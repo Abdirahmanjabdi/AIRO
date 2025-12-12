@@ -1,6 +1,6 @@
 # AIRO Masterclass: The Engineering of Algorithmic Risk Governance
 
-**Author:** Antigravity (Google DeepMind) for VOIDQUANT
+**Author:** Abdirahman Jama for VOIDQUANT
 **Subject:** Building Autonomous Financial Risk Systems
 
 ---
