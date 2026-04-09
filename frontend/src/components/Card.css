@@ -1,0 +1,137 @@
+.broker-card {
+  width: 100%;
+  max-width: 500px;
+  padding: var(--spacing-xl);
+  margin: 0 auto;
+}
+
+.card-header {
+  margin-bottom: var(--spacing-xl);
+  text-align: center;
+}
+
+.card-header h2 {
+  font-size: 1.5rem;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.card-header p {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  text-align: left;
+}
+
+.form-group label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.form-group input {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 12px var(--spacing-md);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  transition: all 0.2s ease;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: rgba(0, 255, 163, 0.4);
+  box-shadow: 0 0 10px rgba(0, 255, 163, 0.1);
+}
+
+.connect-submit {
+  margin-top: var(--spacing-md);
+  width: 100%;
+}
+
+/* Stepper */
+.stepper-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: rgba(0,0,0,0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.step span {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.step.pending {
+  opacity: 0.4;
+}
+
+.step.active {
+  background: rgba(0, 163, 255, 0.05);
+  border-left: 3px solid var(--accent-blue);
+  color: var(--text-primary);
+}
+
+.step.completed {
+  background: rgba(0, 255, 163, 0.05);
+  border-left: 3px solid var(--accent-neon-mint);
+  color: var(--text-primary);
+}
+
+.step-connector {
+  width: 2px;
+  height: 20px;
+  background: var(--glass-border);
+  margin-left: 32px;
+  transition: background 0.3s ease;
+}
+
+.step-connector.active {
+  background: var(--accent-neon-mint);
+}
+
+.stepper-status {
+  text-align: center;
+  margin-top: var(--spacing-lg);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.spin-slow {
+  animation: spin 3s linear infinite;
+}
+
+.pulse {
+  animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.text-blue {
+  color: var(--accent-blue);
+  text-shadow: 0 0 10px rgba(0, 163, 255, 0.3);
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}

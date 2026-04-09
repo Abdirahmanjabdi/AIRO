@@ -1,0 +1,114 @@
+.dashboard-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--bg-core);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header-brand {
+  font-family: var(--font-hero);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.dashboard-main {
+  flex: 1;
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-main.centered {
+  justify-content: center;
+  align-items: center;
+}
+
+.onboarding-wrapper {
+  width: 100%;
+  max-width: 600px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--spacing-xl);
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.dashboard-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.sidebar-card {
+  padding: var(--spacing-lg);
+}
+
+.sidebar-card h4 {
+  font-family: var(--font-body);
+  font-size: 1rem;
+  margin-bottom: var(--spacing-sm);
+}
+
+.text-sm { font-size: 0.85rem; }
+.mt-1 { margin-top: 4px; }
+.mt-2 { margin-top: 8px; }
+.mt-4 { margin-top: 16px; }
+
+.dashboard-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+/* Hide mobile fixed nav on desktop */
+.mobile-fixed-nav {
+  display: none;
+}
+
+/* Mobile Adjustments */
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .dashboard-sidebar {
+    display: none; /* Hide sidebar completely for settings modal flow later */
+  }
+
+  .log-section {
+    margin-bottom: 80px; /* Space for the fixed nav */
+  }
+
+  /* Fixed Bottom Nav for Status */
+  .mobile-fixed-nav {
+    display: flex;
+    justify-content: center;
+    position: fixed;
+    bottom: var(--spacing-sm);
+    left: var(--spacing-sm);
+    right: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    z-index: 50;
+    /* overriding glass panel shadow visually */
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+  }
+
+  .header-status {
+    display: none; /* Move status to the bottom nav on mobile */
+  }
+}
