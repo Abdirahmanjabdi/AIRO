@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sentinel-pod
+description: Sentinel Pod — Per-user headless MT5 container (Data Plane)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

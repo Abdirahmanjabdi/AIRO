@@ -1,0 +1,59 @@
+# =============================================================================
+# Sentinel Pod — Headless MT5 via Wine
+# One container per active user (ephemeral)
+# Ref: ARCHITECTURE.md §2, FP Note: Guaranteed QoS in Helm
+# =============================================================================
+#
+# WARNING: MT5 in Wine is resource-heavy. Helm chart enforces:
+#   resources.requests == resources.limits (Guaranteed QoS)
+#   to prevent OOM-kill mid-trade.
+#
+# WARNING: MetaQuotes licensing must be confirmed with your broker
+#   before production deployment at scale.
+# =============================================================================
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- System Dependencies ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wine64 \
+    wine32 \
+    xvfb \
+    wget \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Python Dependencies (bridge relay only) ---
+RUN pip3 install --no-cache-dir httpx pydantic
+
+# --- Wine Initialization ---
+RUN wineboot --init 2>/dev/null || true
+
+# --- MT5 Setup Directory ---
+WORKDIR /mt5
+RUN mkdir -p /mt5/terminal /mt5/config
+
+# --- Bridge Relay Script ---
+# IP PROTECTION: This script is a RELAY ONLY.
+# It sends telemetry to the Brain API and executes decisions.
+# NO risk logic, NO anomaly detection, NO Bayesian code here.
+# Ref: AI_CONTRACT.md §3
+COPY bridge/ /mt5/bridge/
+
+# --- Entrypoint ---
+COPY infra/docker/mt5-entrypoint.sh /mt5/entrypoint.sh
+RUN chmod +x /mt5/entrypoint.sh
+
+# Environment Variables (populated from Vault at runtime)
+ENV BRAIN_API_URL=http://sentinel-brain:8000 \
+    MT5_ACCOUNT_ID="" \
+    MT5_SERVER="" \
+    DISPLAY=:99
+
+EXPOSE 443
+
+ENTRYPOINT ["/mt5/entrypoint.sh"]

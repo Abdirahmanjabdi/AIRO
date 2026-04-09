@@ -1,0 +1,40 @@
+# Default values for sentinel-pod
+# FP CRITICAL: Guaranteed QoS — limits MUST equal requests
+# This prevents the K8s OOM-Killer from snapping connections mid-trade.
+
+image:
+  repository: sentinel-airo/mt5-pod
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# GUARANTEED QoS: requests == limits (FP adjustment #1)
+# Wine+MT5 is RAM-intensive. Do NOT separate these values.
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "500m"       # MUST equal requests.cpu
+    memory: "512Mi"   # MUST equal requests.memory
+
+env:
+  BRAIN_API_URL: "http://sentinel-brain:8000"
+  VAULT_ADDR: "https://vault.sentinel.internal:8200"
+
+# Per-user labels for scheduling
+userLabels:
+  enabled: true
+  # Set dynamically: sentinel.io/user-id: <user_id>
+
+# Pod lifecycle
+terminationGracePeriodSeconds: 30
+
+# Tolerations for dedicated MT5 node pools
+tolerations:
+  - key: "workload"
+    operator: "Equal"
+    value: "mt5"
+    effect: "NoSchedule"
+
+nodeSelector:
+  workload: mt5
