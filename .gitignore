@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -74,3 +74,8 @@ venv.bak/
 .idea/
 legacy_v1_to_v5/
 infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/tfplan
+infra/terraform/plan_output.txt
+infra/terraform/apply_error.log
