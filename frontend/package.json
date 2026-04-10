@@ -9,8 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "framer-motion": "^11.18.2",
     "lucide-react": "^1.8.0",
-    "next": "14.2.35",
+    "next": "15.5.14",
     "react": "^18",
     "react-countup": "^6.5.3",
     "react-dom": "^18"
@@ -20,7 +21,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",
-    "eslint-config-next": "14.2.35",
+    "eslint-config-next": "15.5.14",
     "typescript": "^5"
   }
 }

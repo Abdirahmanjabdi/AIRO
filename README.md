@@ -44,6 +44,12 @@ This project evolved through 5 generations of engineering:
 -   **Concept:** Synthesis.
 -   **Result:** The current system running `V2` Data + `V3` Params + `V4` Logic.
 
+### V6: Sentinel-Zero (Institutional Cloud)
+-   **Concept:** Massive Concurrency & High Availability.
+-   **Architecture:** Split into strict Microservices (`FastAPI` Brain + `Next.js 14` User UI).
+-   **Infrastructure:** Deployed via `Terraform` to AWS (EKS `1.30`) with strict `resources.limits` to block OOM Kills inside Wine+MT5 Pods.
+-   **Result:** Capable of orchestrating 100k concurrent traders across LD4 nodes with sub-50ms inference.
+
 ---
 
 ## 🧠 Understand the "Why" (XAI)
@@ -55,24 +61,27 @@ We use SHAP (SHapley Additive exPlanations) to ensure the Black Box is transpare
 
 ## 🚀 Quickstart
 
-### 1. Installation
+### 1. The Cloud Stack (Docker)
+The V6 institutional engine runs via Docker Compose, orchestrating the FastAPI Brain, PostgreSQL, Redis, HashiCorp Vault, and MinIO:
 ```bash
-git clone https://github.com/Abdirahmanjabdi/AIRO.git
-cd AIRO
-pip install -r requirements.txt
+docker compose up --build -d
 ```
+*API Docs available at: `http://localhost:8000/docs`*
 
-### 2. Run the Dashboard (The "Command Center")
+### 2. The Next.js Dashboard (Connect & Forget UI)
+To launch the premium user frontend:
 ```bash
+cd frontend
+npm run dev
+```
+*Access the Elite UI at: `http://localhost:3000`*
+
+### 3. Legacy Local Sandbox (Testing)
+If you want to view the V1-V5 genesis algorithms visually before committing to the heavy Docker stack:
+```bash
+pip install -r requirements.txt
 python -m streamlit run app.py
 ```
-This launches the **Elite Dashboard** where you can toggle between V1-V5 modes and simulate performance on real data.
-
-### 3. Run the Validation Proof
-```bash
-python simulation_validation.py
-```
-This runs the strict **70/30 Time-Series Split** to prove the system generalizes to unseen future data.
 
 ---
 

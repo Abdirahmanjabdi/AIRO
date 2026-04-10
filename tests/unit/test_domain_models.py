@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from sentinel.domain.models import (
+    CredentialRequest,
     Decision,
     FeatureContribution,
     HealthResponse,
@@ -29,6 +30,7 @@ class TestTradeContext:
 
     def test_valid_trade_context(self) -> None:
         ctx = TradeContext(
+            user_id="user-123",
             hour_decimal=14.5,
             losing_streak=2,
             drawdown_state=100.0,
@@ -46,6 +48,7 @@ class TestTradeContext:
     def test_context_defaults(self) -> None:
         """V2 features should default to 0.0."""
         ctx = TradeContext(
+            user_id="user-123",
             hour_decimal=9.0,
             losing_streak=0,
             drawdown_state=0.0,
@@ -60,6 +63,7 @@ class TestTradeContext:
     def test_invalid_hour(self) -> None:
         with pytest.raises(ValidationError):
             TradeContext(
+                user_id="user-123",
                 hour_decimal=25.0,  # Invalid
                 losing_streak=0,
                 drawdown_state=0.0,
@@ -72,6 +76,7 @@ class TestTradeContext:
     def test_negative_lots(self) -> None:
         with pytest.raises(ValidationError):
             TradeContext(
+                user_id="user-123",
                 hour_decimal=10.0,
                 losing_streak=0,
                 drawdown_state=0.0,
@@ -84,6 +89,7 @@ class TestTradeContext:
     def test_negative_losing_streak(self) -> None:
         with pytest.raises(ValidationError):
             TradeContext(
+                user_id="user-123",
                 hour_decimal=10.0,
                 losing_streak=-1,  # Invalid
                 drawdown_state=0.0,
@@ -171,6 +177,17 @@ class TestOnboardingStatus:
                 account_id="12345678",
                 min_trades=10,  # Invalid: < 50
             )
+
+
+class TestCredentialRequest:
+    def test_valid_credential_request(self) -> None:
+        request = CredentialRequest(
+            user_id="user-123",
+            broker_server="ICMarkets-Demo",
+            account_id="12345678",
+            read_only_password="secret",
+        )
+        assert request.user_id == "user-123"
 
 
 class TestIntervention:

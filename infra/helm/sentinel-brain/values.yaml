@@ -23,7 +23,8 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 20
   targetCPUUtilizationPercentage: 70
-  targetLatencyP99Ms: 50
+  targetRequestsPerSecond: "50"
+  targetLatencyP99Ms: 100
 
 env:
   REDIS_URL: "redis://sentinel-redis:6379/0"

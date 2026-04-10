@@ -1,47 +1,37 @@
 """
-Sentinel Pod — MT5 Bridge Relay
-=================================
-STATELESS RELAY ONLY. Sends trade telemetry to Brain API,
-receives decisions, executes on MT5.
-
-IP PROTECTION (AI_CONTRACT §3):
-  - NO anomaly detection
-  - NO risk classification
-  - NO Bayesian logic
-  - NO SHAP explanations
-  This script is a DUMB PIPE.
+Sentinel Pod MT5 Bridge Relay
+=============================
+Relay-only bridge for MT5 connectivity, onboarding history pulls,
+and live decision forwarding to the Brain API.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
-import sys
 import time
-from typing import NoReturn
+from pathlib import Path
 
 import httpx
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+from sentinel.bridge.mt5_history import MT5HistoryBridge
+from sentinel.infra.redis_cache import cache_manager
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
+logger = logging.getLogger(__name__)
 
 BRAIN_API_URL: str = os.getenv("BRAIN_API_URL", "http://localhost:8000")
 POLL_INTERVAL_SECONDS: float = float(os.getenv("POLL_INTERVAL", "0.5"))
-HEARTBEAT_INTERVAL: float = 30.0
+DECISION_TIMEOUT_SECONDS: float = float(os.getenv("BRAIN_DECISION_TIMEOUT_SECONDS", "0.5"))
+SIGNAL_FILE: str | None = os.getenv("MT5_SIGNAL_FILE")
 
-
-# =============================================================================
-# DATA MODELS (minimal — no risk logic)
-# =============================================================================
 
 class TradeTelemetry(BaseModel):
-    """Raw telemetry from MT5 terminal. Relay sends this to Brain API."""
+    user_id: str
+    symbol: str = "UNKNOWN"
     hour_decimal: float
     losing_streak: int
     drawdown_state: float
@@ -54,35 +44,30 @@ class TradeTelemetry(BaseModel):
 
 
 class BrainDecision(BaseModel):
-    """Decision received from Brain API. Relay executes this."""
-    decision: str       # ALLOW | BLOCK | REDUCE_SIZE
+    decision: str
     risk_score: float
     size_multiplier: float
     is_anomaly: bool
+    latency_ms: float | None = None
 
-
-# =============================================================================
-# BRIDGE RELAY
-# =============================================================================
 
 class MT5BridgeRelay:
     """
-    The bridge relay loop:
-      1. Poll MT5 for pending trade signals
-      2. Forward telemetry to Brain API
-      3. Execute the Brain's decision on MT5
+    Bridge loop responsibilities:
+      1. Process onboarding commands from Redis.
+      2. Forward live telemetry to the Brain API.
+      3. Execute returned decisions on the MT5-side transport.
     """
 
     def __init__(self, brain_url: str = BRAIN_API_URL) -> None:
         self.brain_url = brain_url.rstrip("/")
-        self._running: bool = True
+        self._running = True
         self._client: httpx.AsyncClient | None = None
+        self._history_bridge = MT5HistoryBridge(self.brain_url)
 
     async def start(self) -> None:
-        """Start the relay loop."""
         logger.info("Bridge relay starting. Brain API: %s", self.brain_url)
 
-        # Register signal handlers for graceful shutdown
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, self._shutdown_handler)
 
@@ -95,133 +80,151 @@ class MT5BridgeRelay:
 
             while self._running:
                 try:
+                    await self._process_onboarding_jobs()
                     await self._poll_and_relay()
                 except Exception as exc:
-                    logger.error("Relay error: %s", exc)
-
+                    logger.error("Relay error: %s", exc, exc_info=True)
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         logger.info("Bridge relay stopped.")
 
     async def _verify_brain_connection(self) -> None:
-        """Verify Brain API is reachable."""
         assert self._client is not None
-        try:
-            resp = await self._client.get("/healthz")
-            if resp.status_code == 200:
-                logger.info("Brain API connected and healthy.")
-            else:
-                logger.warning("Brain API responded with status %d", resp.status_code)
-        except httpx.ConnectError:
-            logger.error("Cannot connect to Brain API at %s", self.brain_url)
+        response = await self._client.get("/healthz")
+        response.raise_for_status()
+        logger.info("Brain API connected and healthy.")
+
+    async def _process_onboarding_jobs(self) -> None:
+        command = await cache_manager.dequeue_onboarding_job(timeout_seconds=1)
+        if command is None:
+            return
+
+        user_id = str(command["user_id"])
+        await cache_manager.set_heartbeat(user_id)
+        logger.info("Processing onboarding job %s for user %s", command["job_id"], user_id)
+        await self._history_bridge.collect_and_submit(
+            job_id=str(command["job_id"]),
+            user_id=user_id,
+            broker_server=str(command["broker_server"]),
+            account_id=str(command["account_id"]),
+            limit=int(command.get("min_trades", 100)),
+        )
 
     async def _poll_and_relay(self) -> None:
-        """
-        One iteration of the relay loop:
-          1. Check MT5 for pending trade signals
-          2. If pending, extract telemetry and send to Brain
-          3. Execute brain's decision
-        """
-        # TODO: Replace with real MT5 API polling
-        # This is the integration point where we read from the MT5 terminal
-        # via the MQL5 bridge or TCP socket.
         telemetry = self._poll_mt5_for_signal()
-
         if telemetry is None:
-            return  # No pending signal
+            return
 
         assert self._client is not None
+        await cache_manager.set_heartbeat(telemetry.user_id)
         decision = await self._send_to_brain(telemetry)
-
         if decision is not None:
             self._execute_decision(decision, telemetry)
 
     async def _send_to_brain(self, telemetry: TradeTelemetry) -> BrainDecision | None:
-        """Forward telemetry to POST /v1/analyze."""
         assert self._client is not None
+        started_at = time.perf_counter()
         try:
-            resp = await self._client.post(
+            response = await self._client.post(
                 "/v1/analyze",
                 json=telemetry.model_dump(),
+                timeout=httpx.Timeout(DECISION_TIMEOUT_SECONDS),
             )
-            resp.raise_for_status()
-            return BrainDecision(**resp.json())
-        except httpx.HTTPError as exc:
-            logger.error("Brain API request failed: %s", exc)
-            # FAIL-SAFE: If Brain is unreachable, block the trade
+            response.raise_for_status()
+            decision = BrainDecision(**response.json())
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            model_latency_ms = decision.latency_ms or 0.0
+            if elapsed_ms > DECISION_TIMEOUT_SECONDS * 1000 or model_latency_ms > 500.0:
+                logger.warning(
+                    "Decision loop exceeded budget for user %s: round_trip=%.2fms model=%.2fms",
+                    telemetry.user_id,
+                    elapsed_ms,
+                    model_latency_ms,
+                )
+                return BrainDecision(
+                    decision="BLOCK",
+                    risk_score=1.0,
+                    size_multiplier=0.0,
+                    is_anomaly=False,
+                    latency_ms=elapsed_ms,
+                )
+            return decision
+        except httpx.TimeoutException:
+            logger.error("Brain API decision timed out after %.0fms", DECISION_TIMEOUT_SECONDS * 1000)
             return BrainDecision(
                 decision="BLOCK",
                 risk_score=1.0,
                 size_multiplier=0.0,
                 is_anomaly=False,
+                latency_ms=DECISION_TIMEOUT_SECONDS * 1000,
+            )
+        except httpx.HTTPError as exc:
+            logger.error("Brain API request failed: %s", exc)
+            return BrainDecision(
+                decision="BLOCK",
+                risk_score=1.0,
+                size_multiplier=0.0,
+                is_anomaly=False,
+                latency_ms=(time.perf_counter() - started_at) * 1000,
             )
 
     def _poll_mt5_for_signal(self) -> TradeTelemetry | None:
         """
-        Poll MT5 terminal for pending trade signals.
-
-        TODO: Implement real MT5 polling via:
-          - MQL5 DLL bridge
-          - Named pipe / TCP socket
-          - File-based signal exchange
-
-        Returns None if no signal pending.
+        Reads live trade telemetry from a sidecar-produced JSON signal file.
+        This keeps the bridge as a transport layer while allowing broker-side
+        tooling to hand off pre-computed telemetry to the Brain API.
         """
-        # Placeholder — in production, read from MT5 terminal
-        return None
+
+        if SIGNAL_FILE is None:
+            return None
+
+        signal_path = Path(SIGNAL_FILE)
+        if not signal_path.exists():
+            return None
+
+        payload = json.loads(signal_path.read_text(encoding="utf-8"))
+        signal_path.unlink(missing_ok=True)
+        return TradeTelemetry.model_validate(payload)
 
     def _execute_decision(
         self,
         decision: BrainDecision,
         telemetry: TradeTelemetry,
     ) -> None:
-        """
-        Execute the Brain's decision on the MT5 terminal.
-
-        Actions:
-          ALLOW      → Let trade execute at original size
-          REDUCE_SIZE → Modify lot size by size_multiplier
-          BLOCK      → Cancel/reject the trade signal
-        """
         if decision.decision == "ALLOW":
             logger.info(
-                "ALLOW: Trade at %.2f lots (risk: %.2f%%)",
+                "ALLOW %s for user %s at %.2f lots",
+                telemetry.symbol,
+                telemetry.user_id,
                 telemetry.lots,
-                decision.risk_score * 100,
             )
-            # TODO: Send ALLOW signal to MT5
+            return
 
-        elif decision.decision == "REDUCE_SIZE":
+        if decision.decision == "REDUCE_SIZE":
             adjusted_lots = round(telemetry.lots * decision.size_multiplier, 2)
             logger.info(
-                "REDUCE_SIZE: %.2f → %.2f lots (risk: %.2f%%, mult: %.2f)",
+                "REDUCE_SIZE %s for user %s: %.2f -> %.2f lots",
+                telemetry.symbol,
+                telemetry.user_id,
                 telemetry.lots,
                 adjusted_lots,
-                decision.risk_score * 100,
-                decision.size_multiplier,
             )
-            # TODO: Modify order size in MT5
+            return
 
-        elif decision.decision == "BLOCK":
-            logger.warning(
-                "BLOCK: Trade rejected (risk: %.2f%%, anomaly: %s)",
-                decision.risk_score * 100,
-                decision.is_anomaly,
-            )
-            # TODO: Cancel trade in MT5
+        logger.warning(
+            "BLOCK %s for user %s (risk %.2f%%, anomaly=%s)",
+            telemetry.symbol,
+            telemetry.user_id,
+            decision.risk_score * 100,
+            decision.is_anomaly,
+        )
 
     def _shutdown_handler(self, signum: int, frame: object) -> None:
-        """Graceful shutdown on SIGINT/SIGTERM."""
         logger.info("Shutdown signal received (%d). Stopping relay...", signum)
         self._running = False
 
 
-# =============================================================================
-# ENTRYPOINT
-# =============================================================================
-
 async def main() -> None:
-    """Bridge relay entrypoint."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

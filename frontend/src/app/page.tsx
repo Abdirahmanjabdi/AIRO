@@ -9,7 +9,8 @@ import RiskStatusBadge from '@/components/RiskStatusBadge';
 import './page.css';
 
 export default function Dashboard() {
-  const [isConnected, setIsConnected] = useState(false);
+  const [credentials, setCredentials] = useState<{userId: string; server: string; accountId: string} | null>(null);
+  const isConnected = credentials !== null;
 
   return (
     <div className="dashboard-layout">
@@ -24,7 +25,7 @@ export default function Dashboard() {
       <main className={`dashboard-main ${!isConnected ? 'centered' : ''}`}>
         {!isConnected ? (
           <div className="onboarding-wrapper">
-            <BrokerConnectCard onConnected={() => setIsConnected(true)} />
+            <BrokerConnectCard onConnected={(userId, server, acct) => setCredentials({ userId, server, accountId: acct })} />
           </div>
         ) : (
           <div className="dashboard-grid animate-slide-up">
@@ -33,9 +34,10 @@ export default function Dashboard() {
             <aside className="dashboard-sidebar">
               <div className="sidebar-card glass-panel">
                 <h4>Broker Config</h4>
-                <p className="text-muted text-sm mt-2">ICMarkets-Demo</p>
-                <p className="text-primary text-sm mt-1">Acct: 98765432</p>
-                <button className="glow-btn mt-4" style={{width: '100%', padding: '8px'}} onClick={() => setIsConnected(false)}>
+                <p className="text-muted text-sm mt-2">User: {credentials.userId}</p>
+                <p className="text-muted text-sm mt-1">{credentials.server}</p>
+                <p className="text-primary text-sm mt-1">Acct: {credentials.accountId}</p>
+                <button className="glow-btn mt-4" style={{width: '100%', padding: '8px'}} onClick={() => setCredentials(null)}>
                   Disconnect
                 </button>
               </div>

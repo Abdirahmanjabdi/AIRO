@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 # Copy source (needed for CSV bootstrap + package)
 COPY src/ ./src/
-COPY "Abdirahman Jama Abdi - REmodal.csv" ./
+COPY ["legacy_v1_to_v5/Abdirahman Jama Abdi - REmodal.csv", "./"]
 
 # Environment
 ENV PYTHONUNBUFFERED=1 \
@@ -48,7 +48,7 @@ EXPOSE 8000
 
 # Health check (K8s also uses /healthz but this is for Docker)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import httpx; r = httpx.get('http://localhost:8000/healthz'); exit(0 if r.status_code == 200 else 1)"
+    CMD python -c 'import httpx; r = httpx.get("http://localhost:8000/healthz"); exit(0 if r.status_code == 200 else 1)'
 
 # Start with uvicorn
 CMD ["uvicorn", "sentinel.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

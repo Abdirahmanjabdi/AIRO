@@ -50,6 +50,7 @@ def trained_brain(sample_df: pd.DataFrame) -> SentinelBrain:
 def sample_context() -> TradeContext:
     """A typical trade context for testing."""
     return TradeContext(
+        user_id="user-123",
         hour_decimal=14.5,
         losing_streak=2,
         drawdown_state=100.0,

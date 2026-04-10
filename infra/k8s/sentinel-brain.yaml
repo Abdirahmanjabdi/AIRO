@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-brain
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sentinel-brain
+  template:
+    metadata:
+      labels:
+        app: sentinel-brain
+    spec:
+      containers:
+      - name: brain
+        image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
+        ports:
+        - containerPort: 8000

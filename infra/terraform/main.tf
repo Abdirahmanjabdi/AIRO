@@ -19,11 +19,6 @@ terraform {
     }
   }
 
-  backend "s3" {
-    bucket = "sentinel-terraform-state"
-    key    = "sentinel-zero/terraform.tfstate"
-    region = "eu-west-2"
-  }
 }
 
 provider "aws" {
@@ -60,7 +55,11 @@ module "eks" {
   version = "~> 20.0"
 
   cluster_name    = "sentinel-${var.environment}"
-  cluster_version = "1.29"
+  cluster_version = "1.30"
+  cluster_endpoint_public_access = true
+
+  enable_cluster_creator_admin_permissions = true
+  authentication_mode                      = "API_AND_CONFIG_MAP"
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -113,6 +112,7 @@ module "rds" {
 
   engine         = "postgres"
   engine_version = "16.2"
+  family         = "postgres16"
   instance_class = var.rds_instance_class
 
   allocated_storage     = 50

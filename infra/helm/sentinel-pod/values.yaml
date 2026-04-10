@@ -21,10 +21,18 @@ env:
   BRAIN_API_URL: "http://sentinel-brain:8000"
   VAULT_ADDR: "https://vault.sentinel.internal:8200"
 
+priorityClass:
+  create: true
+  name: "High"
+  value: 1000000
+  preemptionPolicy: PreemptLowerPriority
+  globalDefault: false
+  description: "Protect Sentinel MT5 relay pods from eviction during volatility spikes."
+
 # Per-user labels for scheduling
 userLabels:
   enabled: true
-  # Set dynamically: sentinel.io/user-id: <user_id>
+  entries: {}
 
 # Pod lifecycle
 terminationGracePeriodSeconds: 30
@@ -38,3 +46,10 @@ tolerations:
 
 nodeSelector:
   workload: mt5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetPendingJobs: "5"
+  targetLatencyP99Ms: "500"

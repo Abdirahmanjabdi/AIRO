@@ -41,6 +41,7 @@ class TestAnalyzeEndpoint:
 
     def test_valid_analyze_request(self, client: TestClient) -> None:
         payload = {
+            "user_id": "test-user-001",
             "hour_decimal": 14.5,
             "losing_streak": 2,
             "drawdown_state": 100.0,
@@ -63,6 +64,7 @@ class TestAnalyzeEndpoint:
 
     def test_invalid_fields_rejected(self, client: TestClient) -> None:
         payload = {
+            "user_id": "test-user-001",
             "hour_decimal": 25.0,  # Invalid
             "losing_streak": 0,
             "drawdown_state": 0.0,
@@ -92,7 +94,7 @@ class TestOnboardingEndpoint:
         resp = client.post("/v1/onboard", json=payload)
         assert resp.status_code == 202
         data = resp.json()
-        assert data["state"] == "pending"
+        assert data["state"] in ("pending", "pulling_history")
         assert "job_id" in data
         assert data["user_id"] == "test-user-001"
 
@@ -124,6 +126,41 @@ class TestOnboardingEndpoint:
         }
         resp = client.post("/v1/onboard", json=payload)
         assert resp.status_code == 422
+
+
+class TestControlPlane:
+    """Tests for credential vaulting and provisioning webhooks."""
+
+    def test_credentials_are_stored_via_vault_route(self, client: TestClient) -> None:
+        payload = {
+            "user_id": "test-user-credentials",
+            "broker_server": "ICMarkets-Demo",
+            "account_id": "11223344",
+            "read_only_password": "read-only-secret",
+        }
+        resp = client.post("/v1/credentials", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["user_id"] == payload["user_id"]
+        assert data["stored"] is True
+        assert data["vault_path"].endswith(f"/users/{payload['user_id']}/mt5")
+
+    def test_whop_webhook_generates_api_key_and_helm_command(self, client: TestClient) -> None:
+        payload = {
+            "event": "membership.activated",
+            "user_id": "whop-user-001",
+            "email": "user@example.com",
+            "plan": "pro",
+        }
+        resp = client.post("/v1/webhooks/whop", json=payload)
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["user_id"] == payload["user_id"]
+        assert data["api_key"].startswith("sz_live_")
+        assert data["api_key_last4"] == data["api_key"][-4:]
+        assert data["helm_release"].startswith("sentinel-pod-whop-user-001")
+        assert "helm upgrade --install" in data["helm_command"]
+        assert "--set-string env.SENTINEL_USER_ID=whop-user-001" in data["helm_command"]
 
 
 class TestUserProfile:

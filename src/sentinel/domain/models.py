@@ -1,13 +1,8 @@
 """
 Sentinel-Zero Domain Models
 ============================
-Pydantic models defining the data contracts for the entire system.
-Referenced by: ARCHITECTURE.md §4, AI_CONTRACT.md §4
-
-Rules:
-  - No `Any` types (AI_CONTRACT §1.1)
-  - All API boundaries use these models
-  - V5 logic NEVER references bridge-side code (AI_CONTRACT §3)
+Pydantic models defining the contracts used by the frontend, API,
+bridge, and persistence boundaries.
 """
 
 from __future__ import annotations
@@ -20,256 +15,215 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-# =============================================================================
-# ENUMS
-# =============================================================================
-
 class Decision(str, Enum):
-    """Risk engine output decision. Maps to MT5 bridge actions."""
+    """Risk engine output decision."""
+
     ALLOW = "ALLOW"
     BLOCK = "BLOCK"
     REDUCE_SIZE = "REDUCE_SIZE"
 
 
 class OnboardingState(str, Enum):
-    """Async onboarding job lifecycle (FP: never synchronous)."""
+    """Async onboarding job lifecycle."""
+
     PENDING = "pending"
     PULLING_HISTORY = "pulling_history"
     TRAINING = "training"
+    BLANK_BASELINE = "blank_baseline"
     READY = "ready"
     FAILED = "failed"
 
 
 class RiskMode(str, Enum):
-    """Brain operating mode for audit trail."""
+    """Brain operating mode for audit trail and UI state."""
+
     NORMAL = "normal"
-    RISK_OFF = "risk_off"          # Circuit-breaker tripped
-    BASELINE_PENDING = "baseline_pending"  # < 50 trades
+    RISK_OFF = "risk_off"
+    BASELINE_PENDING = "baseline_pending"
 
-
-# =============================================================================
-# INPUT MODELS
-# =============================================================================
 
 class TradeContext(BaseModel):
     """
     Trade telemetry sent from the Sentinel Pod bridge to the Brain API.
-    9 features: 7 behavioral + 2 context (V2).
-
-    Ref: ARCHITECTURE.md §3.2
     """
-    # --- Behavioral Features (V1) ---
-    hour_decimal: float = Field(
-        ..., ge=0.0, le=23.99,
-        description="Trading hour as decimal (14:30 → 14.5)",
-    )
-    losing_streak: int = Field(
-        ..., ge=0,
-        description="Consecutive losses count",
-    )
-    drawdown_state: float = Field(
-        ..., ge=0.0,
-        description="Distance from equity high-water mark ($)",
-    )
-    lot_deviation: float = Field(
-        ...,
-        description="Z-score of current lot size vs 20-trade rolling mean",
-    )
-    revenge_timer: float = Field(
-        ..., ge=0.0,
-        description="Minutes since previous trade closed",
-    )
-    lots: float = Field(
-        ..., gt=0.0,
-        description="Position size in lots",
-    )
-    rr_ratio: float = Field(
-        ..., gt=0.0,
-        description="Risk-Reward ratio",
-    )
 
-    # --- Context Features (V2) ---
-    realized_vol_20: float = Field(
-        default=0.0, ge=0.0,
-        description="20-trade rolling volatility of trade ranges",
-    )
-    trend_momentum: float = Field(
-        default=0.0, ge=0.0,
-        description="Absolute 20-trade rolling mean of price changes",
-    )
+    user_id: str = Field(..., min_length=1, description="Unique Sentinel user identifier")
+    symbol: str = Field(default="UNKNOWN", min_length=1, description="Trading instrument")
+    hour_decimal: float = Field(..., ge=0.0, le=23.99)
+    losing_streak: int = Field(..., ge=0)
+    drawdown_state: float = Field(..., ge=0.0)
+    lot_deviation: float
+    revenge_timer: float = Field(..., ge=0.0)
+    lots: float = Field(..., gt=0.0)
+    rr_ratio: float = Field(..., gt=0.0)
+    realized_vol_20: float = Field(default=0.0, ge=0.0)
+    trend_momentum: float = Field(default=0.0, ge=0.0)
 
     @field_validator("hour_decimal")
     @classmethod
-    def validate_hour_range(cls, v: float) -> float:
-        if not 0.0 <= v <= 23.99:
-            raise ValueError(f"hour_decimal must be 0.0-23.99, got {v}")
-        return round(v, 2)
+    def validate_hour_range(cls, value: float) -> float:
+        if not 0.0 <= value <= 23.99:
+            raise ValueError(f"hour_decimal must be 0.0-23.99, got {value}")
+        return round(value, 2)
 
-
-# =============================================================================
-# OUTPUT MODELS
-# =============================================================================
 
 class FeatureContribution(BaseModel):
     """Single SHAP explanation entry."""
-    feature: str = Field(..., description="Feature name")
-    impact: float = Field(..., description="SHAP value (+/- contribution)")
+
+    feature: str
+    impact: float
 
 
 class RiskAssessment(BaseModel):
-    """
-    Brain API response for POST /v1/analyze.
-    Contains the intervention decision and explainability data.
+    """Brain API response for POST /v1/analyze."""
 
-    Ref: AI_CONTRACT.md §4.2
-    """
     decision: Decision
     risk_score: float = Field(..., ge=0.0, le=1.0)
     is_anomaly: bool
     size_multiplier: float = Field(..., ge=0.0, le=1.0)
-    explanation: list[FeatureContribution] = Field(
-        default_factory=list,
-        description="Top-3 SHAP feature contributions",
-    )
-    latency_ms: float = Field(
-        ..., ge=0.0,
-        description="End-to-end inference latency in milliseconds",
-    )
-    mode: RiskMode = Field(
-        default=RiskMode.NORMAL,
-        description="Current brain operating mode",
-    )
+    explanation: list[FeatureContribution] = Field(default_factory=list)
+    latency_ms: float = Field(..., ge=0.0)
+    mode: RiskMode = Field(default=RiskMode.NORMAL)
 
-
-# =============================================================================
-# USER & ONBOARDING MODELS
-# =============================================================================
 
 class UserBaseline(BaseModel):
-    """
-    Per-user model metadata. Weights stored in S3, not PG.
+    """Per-user model metadata returned to the frontend/API."""
 
-    Ref: ARCHITECTURE.md §4.3 (FP adjustment #3)
-    """
-    user_id: str = Field(..., description="Unique user identifier")
+    user_id: str
+    broker_server: str | None = None
+    account_id: str | None = None
     trade_count: int = Field(..., ge=0)
-    model_s3_key: str | None = Field(
-        default=None,
-        description="S3 object key for the .joblib model file",
-    )
-    trained_at: datetime | None = Field(
-        default=None,
-        description="Timestamp of last model training",
-    )
-    is_baseline_ready: bool = Field(
-        default=False,
-        description="True when trade_count >= 50 and model is trained",
-    )
-    risk_threshold: float = Field(
-        default=0.6537,
-        description="Bayesian-optimized risk threshold for this user",
-    )
-    contamination: float = Field(
-        default=0.0399,
-        description="Isolation Forest contamination parameter",
-    )
+    model_s3_key: str | None = None
+    trained_at: datetime | None = None
+    is_baseline_ready: bool = False
+    risk_threshold: float = 0.6537
+    contamination: float = 0.0399
 
     @field_validator("is_baseline_ready")
     @classmethod
-    def validate_baseline(cls, v: bool, info: object) -> bool:
-        """Baseline cannot be ready if trade_count < 50."""
-        # Access other field values through info.data
+    def validate_baseline(cls, value: bool, info: object) -> bool:
         data = getattr(info, "data", {})
         trade_count = data.get("trade_count", 0)
-        if v and trade_count < 50:
+        if value and trade_count < 50:
             raise ValueError(
                 f"Cannot be baseline_ready with only {trade_count} trades (min 50)"
             )
-        return v
+        return value
 
 
 class OnboardingRequest(BaseModel):
-    """POST /v1/onboard request body."""
+    """Public onboarding request body."""
+
     user_id: str = Field(..., min_length=1)
-    broker_server: str = Field(..., description="MT5 broker server name")
-    account_id: str = Field(..., description="MT5 account number")
-    # Credentials are NOT passed here — they go through Vault
-    min_trades: int = Field(default=50, ge=50, le=500)
+    broker_server: str = Field(..., min_length=1)
+    account_id: str = Field(..., min_length=1)
+    min_trades: int = Field(default=100, ge=50, le=500)
+
+
+class CredentialRequest(BaseModel):
+    """Secure broker credential submission stored in Vault."""
+
+    user_id: str = Field(..., min_length=1)
+    broker_server: str = Field(..., min_length=1)
+    account_id: str = Field(..., min_length=1)
+    read_only_password: str = Field(..., min_length=1)
+
+
+class CredentialResponse(BaseModel):
+    """Response after secure credential storage."""
+
+    user_id: str
+    stored: bool
+    vault_path: str
+
+
+class WhopWebhookRequest(BaseModel):
+    """Lifecycle webhook payload from Whop."""
+
+    event: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=3)
+    plan: str = Field(..., min_length=1)
+
+
+class WhopWebhookResponse(BaseModel):
+    """Provisioning response generated from a Whop event."""
+
+    user_id: str
+    api_key: str
+    api_key_last4: str
+    helm_release: str
+    helm_command: str
+    provisioning_state: str
 
 
 class OnboardingStatus(BaseModel):
-    """
-    GET /v1/onboard/{job_id} response.
-    Async pattern: POST returns 202 + job_id, client polls this.
+    """Async onboarding status response."""
 
-    Ref: FP adjustment #2
-    """
-    job_id: str = Field(
-        default_factory=lambda: str(uuid.uuid4()),
-        description="Unique async job identifier",
-    )
+    job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     state: OnboardingState = Field(default=OnboardingState.PENDING)
     trade_count: int = Field(default=0, ge=0)
     message: str = Field(default="Job queued")
-    model_s3_key: str | None = Field(default=None)
+    model_s3_key: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: datetime | None = Field(default=None)
+    completed_at: datetime | None = None
 
 
-# =============================================================================
-# AUDIT MODELS
-# =============================================================================
+class HistoricalTrade(BaseModel):
+    """Normalized historical trade sent by the MT5 bridge."""
+
+    symbol: str = Field(..., min_length=1)
+    open_time: datetime
+    close_time: datetime
+    pnl: float
+    lots: float = Field(..., gt=0.0)
+    open_price: float = Field(..., gt=0.0)
+    close_price: float = Field(..., gt=0.0)
+    rr_ratio: float = Field(default=1.0, gt=0.0)
+
+
+class OnboardingDataSubmission(BaseModel):
+    """Historical trade payload posted back by the MT5 bridge."""
+
+    job_id: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    trades: list[HistoricalTrade] = Field(..., max_length=500)
+
 
 class Intervention(BaseModel):
-    """
-    Audit log entry for every intervention event.
-    Stored in PostgreSQL for compliance and ROM reporting.
-    """
-    intervention_id: str = Field(
-        default_factory=lambda: str(uuid.uuid4()),
-    )
+    """Audit log entry for a live intervention event."""
+
+    intervention_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    symbol: str = Field(..., description="Trading instrument (e.g. EURUSD)")
+    symbol: str
     decision: Decision
     risk_score: float = Field(..., ge=0.0, le=1.0)
     size_multiplier: float = Field(..., ge=0.0, le=1.0)
-    original_pnl: float = Field(
-        ..., description="PnL if trade executed at full size",
-    )
-    adjusted_pnl: float = Field(
-        ..., description="PnL after AIRO intervention",
-    )
-    capital_saved: float = Field(
-        ..., description="original_pnl - adjusted_pnl (positive = saved)",
-    )
-    top_reason: str = Field(
-        ..., description="Primary SHAP feature driving the decision",
-    )
+    original_pnl: float
+    adjusted_pnl: float
+    capital_saved: float
+    top_reason: str
 
     @field_validator("capital_saved")
     @classmethod
-    def validate_capital_saved(cls, v: float, info: object) -> float:
-        """Capital saved should be consistent with PnL values."""
+    def validate_capital_saved(cls, value: float, info: object) -> float:
         data = getattr(info, "data", {})
         original = data.get("original_pnl", 0.0)
         adjusted = data.get("adjusted_pnl", 0.0)
         expected = original - adjusted
-        if abs(v - expected) > 0.01:
+        if abs(value - expected) > 0.01:
             raise ValueError(
-                f"capital_saved ({v}) != original_pnl ({original}) - "
+                f"capital_saved ({value}) != original_pnl ({original}) - "
                 f"adjusted_pnl ({adjusted}) = {expected}"
             )
-        return v
+        return value
 
-
-# =============================================================================
-# HEALTH CHECK MODELS
-# =============================================================================
 
 class HealthResponse(BaseModel):
     """GET /healthz response."""
+
     status: Literal["ok", "degraded", "down"]
     version: str = Field(default="1.0.0")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -277,8 +231,9 @@ class HealthResponse(BaseModel):
 
 class ReadinessResponse(BaseModel):
     """GET /readyz response."""
+
     status: Literal["ready", "not_ready"]
-    model_loaded: bool = Field(default=False)
-    redis_connected: bool = Field(default=False)
-    db_connected: bool = Field(default=False)
+    model_loaded: bool = False
+    redis_connected: bool = False
+    db_connected: bool = False
     details: dict[str, str] = Field(default_factory=dict)

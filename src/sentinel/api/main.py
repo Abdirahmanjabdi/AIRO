@@ -19,10 +19,10 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sentinel.api.dependencies import initialize_runtime, shutdown_runtime
+from sentinel.api.middleware import RequestIdMiddleware
 from sentinel.api.routes.analysis import router as analysis_router
 from sentinel.api.routes.health import router as health_router
-from sentinel.api.middleware import RequestIdMiddleware
-from sentinel.api.dependencies import get_brain, load_default_model
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan manager.
-    - Startup: Load the default model into memory.
+    - Startup: Initialize runtime services and load the default model.
     - Shutdown: Cleanup resources.
     """
     logger.info("Sentinel Brain API starting up...")
-    load_default_model()
+    await initialize_runtime()
     logger.info("Sentinel Brain API ready.")
     yield
+    await shutdown_runtime()
     logger.info("Sentinel Brain API shutting down.")
 
 
