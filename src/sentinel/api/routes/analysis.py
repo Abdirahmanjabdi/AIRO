@@ -25,6 +25,8 @@ from sentinel.api.dependencies import cache_user_brain, get_user_brain
 from sentinel.brain.feature_engine import engineer_features
 from sentinel.brain.risk_engine import SentinelBrain
 from sentinel.domain.models import (
+    AdminOverview,
+    AdminUserRecord,
     CredentialRequest,
     CredentialResponse,
     Decision,
@@ -33,9 +35,11 @@ from sentinel.domain.models import (
     OnboardingRequest,
     OnboardingState,
     OnboardingStatus,
+    RiskAuditRecord,
     RiskAssessment,
     TradeContext,
     UserBaseline,
+    WorkspaceSummary,
     WhopWebhookRequest,
     WhopWebhookResponse,
 )
@@ -45,6 +49,10 @@ from sentinel.infra.db import (
     get_db,
     get_onboarding_job,
     get_user,
+    list_api_credentials,
+    list_onboarding_jobs,
+    list_risk_audits,
+    list_users,
     record_risk_audit,
     upsert_api_credential,
     update_onboarding_job,
@@ -103,6 +111,24 @@ def _user_to_profile(user: object) -> UserBaseline:
         model_s3_key=getattr(user, "model_s3_key"),
         trained_at=getattr(user, "trained_at"),
         is_baseline_ready=bool(getattr(user, "is_baseline_ready")),
+    )
+
+
+def _audit_to_record(audit: object) -> RiskAuditRecord:
+    return RiskAuditRecord(
+        audit_id=getattr(audit, "id", None),
+        user_id=str(getattr(audit, "user_id")),
+        symbol=str(getattr(audit, "symbol") or "UNKNOWN"),
+        decision=Decision(str(getattr(audit, "decision"))),
+        risk_score=float(getattr(audit, "risk_score") or 0.0),
+        size_multiplier=float(getattr(audit, "size_multiplier") or 0.0),
+        mode=str(getattr(audit, "mode") or "normal"),
+        is_anomaly=bool(getattr(audit, "is_anomaly")),
+        top_reason=getattr(audit, "top_reason"),
+        explanation=getattr(audit, "explanation", []) or [],
+        latency_ms=float(getattr(audit, "latency_ms") or 0.0),
+        cached=bool(getattr(audit, "cached")),
+        created_at=getattr(audit, "created_at") or datetime.utcnow(),
     )
 
 
@@ -498,3 +524,138 @@ async def get_user_profile(
     if user is None:
         return UserBaseline(user_id=user_id, trade_count=0, is_baseline_ready=False)
     return _user_to_profile(user)
+
+
+@router.get(
+    "/user/{user_id}/audits",
+    response_model=list[RiskAuditRecord],
+    summary="List recent risk audits for a user",
+)
+async def get_user_audits(
+    user_id: str,
+    limit: int = 50,
+    session: AsyncSession = Depends(get_db),
+) -> list[RiskAuditRecord]:
+    safe_limit = min(max(limit, 1), 200)
+    audits = await list_risk_audits(session, user_id=user_id, limit=safe_limit)
+    return [_audit_to_record(audit) for audit in audits]
+
+
+@router.get(
+    "/user/{user_id}/dashboard",
+    response_model=WorkspaceSummary,
+    summary="Get dashboard workspace data for a user",
+)
+async def get_user_dashboard(
+    user_id: str,
+    limit: int = 50,
+    session: AsyncSession = Depends(get_db),
+) -> WorkspaceSummary:
+    user = await get_user(session, user_id)
+    profile = (
+        _user_to_profile(user)
+        if user is not None
+        else UserBaseline(user_id=user_id, trade_count=0, is_baseline_ready=False)
+    )
+
+    audits = await list_risk_audits(session, user_id=user_id, limit=min(max(limit, 1), 200))
+    records = [_audit_to_record(audit) for audit in audits]
+
+    decision_counts = {decision.value: 0 for decision in Decision}
+    for record in records:
+        decision_counts[record.decision.value] += 1
+
+    average_risk_score = (
+        sum(record.risk_score for record in records) / len(records)
+        if records
+        else 0.0
+    )
+    average_latency_ms = (
+        sum(record.latency_ms for record in records) / len(records)
+        if records
+        else 0.0
+    )
+    protection_events = sum(
+        1 for record in records if record.decision in {Decision.BLOCK, Decision.REDUCE_SIZE}
+    )
+
+    return WorkspaceSummary(
+        user_id=user_id,
+        profile=profile,
+        recent_audits=records,
+        latest_assessment=records[0] if records else None,
+        decision_counts=decision_counts,
+        average_risk_score=average_risk_score,
+        average_latency_ms=average_latency_ms,
+        protection_events=protection_events,
+        blank_baseline=(not profile.is_baseline_ready and profile.trade_count == 0),
+    )
+
+
+@router.get(
+    "/admin/overview",
+    response_model=AdminOverview,
+    summary="Get fleet-wide admin overview",
+)
+async def get_admin_overview(
+    session: AsyncSession = Depends(get_db),
+) -> AdminOverview:
+    users = await list_users(session, limit=250)
+    credentials = await list_api_credentials(session, limit=250)
+    audits = await list_risk_audits(session, limit=500)
+    jobs = await list_onboarding_jobs(session, limit=50)
+
+    credentials_by_user = {credential.user_id: credential for credential in credentials}
+    latest_audit_by_user: dict[str, RiskAuditRecord] = {}
+    for audit in audits:
+        if audit.user_id not in latest_audit_by_user:
+            latest_audit_by_user[audit.user_id] = _audit_to_record(audit)
+
+    user_rows: list[AdminUserRecord] = []
+    for user in users:
+        credential = credentials_by_user.get(user.user_id)
+        latest = latest_audit_by_user.get(user.user_id)
+        user_rows.append(
+            AdminUserRecord(
+                user_id=user.user_id,
+                broker_server=user.broker_server,
+                account_id=user.account_id,
+                email=getattr(credential, "email", None),
+                plan=getattr(credential, "plan", None),
+                provisioning_state=getattr(credential, "provisioning_state", None),
+                helm_release=getattr(credential, "helm_release", None),
+                trade_count=user.trade_count or 0,
+                is_baseline_ready=bool(user.is_baseline_ready),
+                model_s3_key=user.model_s3_key,
+                trained_at=user.trained_at,
+                latest_risk_score=latest.risk_score if latest is not None else None,
+                latest_decision=latest.decision if latest is not None else None,
+                latest_mode=latest.mode if latest is not None else None,
+                last_audit_at=latest.created_at if latest is not None else None,
+                created_at=user.created_at,
+                updated_at=user.updated_at,
+            )
+        )
+
+    total_audits = len(audits)
+    blocked_decisions = sum(1 for audit in audits if getattr(audit, "decision", "") == Decision.BLOCK.value)
+    reduced_decisions = sum(
+        1 for audit in audits if getattr(audit, "decision", "") == Decision.REDUCE_SIZE.value
+    )
+    average_risk_score = (
+        sum(float(getattr(audit, "risk_score", 0.0) or 0.0) for audit in audits) / total_audits
+        if total_audits
+        else 0.0
+    )
+
+    return AdminOverview(
+        total_users=len(users),
+        baseline_ready_users=sum(1 for user in users if user.is_baseline_ready),
+        active_api_credentials=len(credentials_by_user),
+        total_audits=total_audits,
+        blocked_decisions=blocked_decisions,
+        reduced_decisions=reduced_decisions,
+        average_risk_score=average_risk_score,
+        users=user_rows,
+        recent_jobs=[_job_to_status(job) for job in jobs],
+    )

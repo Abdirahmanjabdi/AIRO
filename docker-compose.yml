@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      CORS_ORIGINS: "http://localhost:3000"
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:8080"
       REDIS_URL: "redis://redis:6379/0"
       DATABASE_URL: "postgresql+asyncpg://sentinel:sentinel@postgres:5432/sentinel"
       SENTINEL_MODEL_PATH: "/app/default_model.joblib"
@@ -57,13 +57,19 @@ services:
   frontend:
     image: node:20-alpine
     working_dir: /app/frontend
-    command: ["sh", "-c", "npm ci && npm run dev -- --hostname 0.0.0.0 --port 3000"]
+    command:
+      [
+        "sh",
+        "-c",
+        "if [ ! -x node_modules/.bin/vite ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 8080",
+      ]
     environment:
-      NEXT_PUBLIC_BRAIN_API_URL: "http://localhost:8000"
+      VITE_BRAIN_API_URL: "http://localhost:8000"
     ports:
-      - "3000:3000"
+      - "8080:8080"
     volumes:
       - .:/app
+      - frontend_node_modules:/app/frontend/node_modules
     depends_on:
       brain:
         condition: service_healthy
@@ -121,3 +127,4 @@ services:
 volumes:
   pgdata:
   miniodata:
+  frontend_node_modules:

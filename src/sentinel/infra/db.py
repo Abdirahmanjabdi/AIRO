@@ -122,6 +122,10 @@ _memory_jobs: dict[str, OnboardingJob] = {}
 _memory_audits: list[RiskAudit] = []
 
 
+def _sort_timestamp(value: datetime | None) -> datetime:
+    return value or datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _hash_api_key(raw_api_key: str) -> str:
     return hashlib.sha256(raw_api_key.encode("utf-8")).hexdigest()
 
@@ -218,6 +222,31 @@ async def get_api_credential(session: AsyncSession, user_id: str) -> ApiCredenti
         return _memory_api_credentials.get(user_id)
 
 
+async def list_api_credentials(session: AsyncSession, limit: int = 200) -> list[ApiCredential]:
+    if not DB_AVAILABLE:
+        credentials = sorted(
+            _memory_api_credentials.values(),
+            key=lambda credential: _sort_timestamp(getattr(credential, "updated_at", None)),
+            reverse=True,
+        )
+        return credentials[:limit]
+
+    try:
+        result = await session.execute(
+            select(ApiCredential)
+            .order_by(ApiCredential.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+    except Exception:
+        credentials = sorted(
+            _memory_api_credentials.values(),
+            key=lambda credential: _sort_timestamp(getattr(credential, "updated_at", None)),
+            reverse=True,
+        )
+        return credentials[:limit]
+
+
 async def upsert_api_credential(
     session: AsyncSession,
     user_id: str,
@@ -307,6 +336,31 @@ async def get_onboarding_job(session: AsyncSession, job_id: str) -> OnboardingJo
         return _memory_jobs.get(job_id)
 
 
+async def list_onboarding_jobs(session: AsyncSession, limit: int = 100) -> list[OnboardingJob]:
+    if not DB_AVAILABLE:
+        jobs = sorted(
+            _memory_jobs.values(),
+            key=lambda job: _sort_timestamp(getattr(job, "created_at", None)),
+            reverse=True,
+        )
+        return jobs[:limit]
+
+    try:
+        result = await session.execute(
+            select(OnboardingJob)
+            .order_by(OnboardingJob.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+    except Exception:
+        jobs = sorted(
+            _memory_jobs.values(),
+            key=lambda job: _sort_timestamp(getattr(job, "created_at", None)),
+            reverse=True,
+        )
+        return jobs[:limit]
+
+
 async def update_onboarding_job(
     session: AsyncSession,
     job_id: str,
@@ -374,3 +428,63 @@ async def record_risk_audit(
     except Exception:
         _memory_audits.append(audit)
     return audit
+
+
+async def list_risk_audits(
+    session: AsyncSession,
+    user_id: str | None = None,
+    limit: int = 50,
+) -> list[RiskAudit]:
+    if not DB_AVAILABLE:
+        audits = _memory_audits
+        if user_id is not None:
+            audits = [audit for audit in audits if audit.user_id == user_id]
+        audits = sorted(
+            audits,
+            key=lambda audit: _sort_timestamp(getattr(audit, "created_at", None)),
+            reverse=True,
+        )
+        return audits[:limit]
+
+    try:
+        query = select(RiskAudit)
+        if user_id is not None:
+            query = query.where(RiskAudit.user_id == user_id)
+        query = query.order_by(RiskAudit.created_at.desc()).limit(limit)
+        result = await session.execute(query)
+        return list(result.scalars().all())
+    except Exception:
+        audits = _memory_audits
+        if user_id is not None:
+            audits = [audit for audit in audits if audit.user_id == user_id]
+        audits = sorted(
+            audits,
+            key=lambda audit: _sort_timestamp(getattr(audit, "created_at", None)),
+            reverse=True,
+        )
+        return audits[:limit]
+
+
+async def list_users(session: AsyncSession, limit: int = 200) -> list[User]:
+    if not DB_AVAILABLE:
+        users = sorted(
+            _memory_users.values(),
+            key=lambda user: _sort_timestamp(getattr(user, "updated_at", None)),
+            reverse=True,
+        )
+        return users[:limit]
+
+    try:
+        result = await session.execute(
+            select(User)
+            .order_by(User.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+    except Exception:
+        users = sorted(
+            _memory_users.values(),
+            key=lambda user: _sort_timestamp(getattr(user, "updated_at", None)),
+            reverse=True,
+        )
+        return users[:limit]

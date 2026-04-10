@@ -46,7 +46,7 @@ This project evolved through 5 generations of engineering:
 
 ### V6: Sentinel-Zero (Institutional Cloud)
 -   **Concept:** Massive Concurrency & High Availability.
--   **Architecture:** Split into strict Microservices (`FastAPI` Brain + `Next.js 14` User UI).
+-   **Architecture:** Split into strict Microservices (`FastAPI` Brain + `Vite + React` User UI).
 -   **Infrastructure:** Deployed via `Terraform` to AWS (EKS `1.30`) with strict `resources.limits` to block OOM Kills inside Wine+MT5 Pods.
 -   **Result:** Capable of orchestrating 100k concurrent traders across LD4 nodes with sub-50ms inference.
 
@@ -68,13 +68,13 @@ docker compose up --build -d
 ```
 *API Docs available at: `http://localhost:8000/docs`*
 
-### 2. The Next.js Dashboard (Connect & Forget UI)
+### 2. The Sentinel Dashboard (Connect & Forget UI)
 To launch the premium user frontend:
 ```bash
 cd frontend
 npm run dev
 ```
-*Access the Elite UI at: `http://localhost:3000`*
+*Access the Elite UI at: `http://localhost:8080`*
 
 ### 3. Legacy Local Sandbox (Testing)
 If you want to view the V1-V5 genesis algorithms visually before committing to the heavy Docker stack:

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Sentinel Zero</title>
+  <desc id="desc">Sentinel Zero command center preview card.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#04131F" />
+      <stop offset="55%" stop-color="#0B2533" />
+      <stop offset="100%" stop-color="#12384C" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4ECDC4" />
+      <stop offset="100%" stop-color="#A8FF78" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" rx="36" fill="url(#bg)" />
+  <circle cx="965" cy="132" r="112" fill="#4ECDC4" opacity="0.12" />
+  <circle cx="180" cy="510" r="180" fill="#A8FF78" opacity="0.08" />
+  <rect x="74" y="76" width="1052" height="478" rx="32" fill="#071B29" stroke="#4ECDC4" stroke-opacity="0.18" />
+  <rect x="112" y="118" width="370" height="22" rx="11" fill="#173747" />
+  <rect x="112" y="172" width="248" height="118" rx="28" fill="#0D2230" stroke="#4ECDC4" stroke-opacity="0.22" />
+  <rect x="390" y="172" width="248" height="118" rx="28" fill="#0D2230" stroke="#F5A623" stroke-opacity="0.22" />
+  <rect x="668" y="172" width="248" height="118" rx="28" fill="#0D2230" stroke="#E63946" stroke-opacity="0.22" />
+  <rect x="946" y="172" width="124" height="118" rx="28" fill="#0D2230" stroke="#4ECDC4" stroke-opacity="0.22" />
+  <rect x="112" y="330" width="494" height="168" rx="28" fill="#0D2230" stroke="#4ECDC4" stroke-opacity="0.18" />
+  <rect x="636" y="330" width="434" height="168" rx="28" fill="#0D2230" stroke="#4ECDC4" stroke-opacity="0.18" />
+  <text x="114" y="214" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8EB2C2">Protection events</text>
+  <text x="114" y="258" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="700" fill="#EAF8FF">142</text>
+  <text x="392" y="214" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8EB2C2">Average risk</text>
+  <text x="392" y="258" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="700" fill="#EAF8FF">0.41</text>
+  <text x="670" y="214" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8EB2C2">Decision loop</text>
+  <text x="670" y="258" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="700" fill="#EAF8FF">182ms</text>
+  <text x="948" y="214" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8EB2C2">Mode</text>
+  <text x="948" y="258" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700" fill="#A8FF78">LIVE</text>
+  <text x="112" y="412" font-family="Inter, Arial, sans-serif" font-size="74" font-weight="800" fill="url(#glow)">SENTINEL ZERO</text>
+  <text x="112" y="456" font-family="Inter, Arial, sans-serif" font-size="24" fill="#C7DFEA">Identity-first trade protection for the traders you cannot afford to lose.</text>
+  <text x="112" y="490" font-family="Inter, Arial, sans-serif" font-size="24" fill="#C7DFEA">Vault-secured onboarding. Per-user baselines. Sub-500ms decision loops.</text>
+  <text x="670" y="382" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8EB2C2">Capital saved</text>
+  <text x="670" y="438" font-family="Inter, Arial, sans-serif" font-size="66" font-weight="800" fill="#EAF8FF">$184,240</text>
+  <text x="670" y="478" font-family="Inter, Arial, sans-serif" font-size="22" fill="#9BC1CF">Real-time command center built for Whop-native growth.</text>
+</svg>

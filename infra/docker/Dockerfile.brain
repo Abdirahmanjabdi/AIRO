@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 # Copy source (needed for CSV bootstrap + package)
 COPY src/ ./src/
+COPY default_model.joblib ./default_model.joblib
 COPY ["legacy_v1_to_v5/Abdirahman Jama Abdi - REmodal.csv", "./"]
 
 # Environment

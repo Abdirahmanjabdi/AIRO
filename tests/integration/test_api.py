@@ -173,3 +173,48 @@ class TestUserProfile:
         assert data["user_id"] == "test-user-001"
         assert "trade_count" in data
         assert "is_baseline_ready" in data
+
+
+class TestDashboardReads:
+    """Tests for dashboard summary and audit feeds."""
+
+    def test_user_audits_feed(self, client: TestClient) -> None:
+        payload = {
+            "user_id": "dashboard-user-001",
+            "symbol": "EURUSD",
+            "hour_decimal": 10.25,
+            "losing_streak": 1,
+            "drawdown_state": 8.0,
+            "lot_deviation": 0.18,
+            "revenge_timer": 12.0,
+            "lots": 0.3,
+            "rr_ratio": 1.8,
+            "realized_vol_20": 0.015,
+            "trend_momentum": 0.12,
+        }
+        analyze = client.post("/v1/analyze", json=payload)
+        assert analyze.status_code == 200
+
+        audits = client.get("/v1/user/dashboard-user-001/audits")
+        assert audits.status_code == 200
+        data = audits.json()
+        assert len(data) >= 1
+        assert data[0]["user_id"] == "dashboard-user-001"
+        assert data[0]["symbol"] == "EURUSD"
+
+    def test_user_dashboard_summary(self, client: TestClient) -> None:
+        resp = client.get("/v1/user/dashboard-user-001/dashboard")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["user_id"] == "dashboard-user-001"
+        assert "profile" in data
+        assert "recent_audits" in data
+        assert "decision_counts" in data
+
+    def test_admin_overview(self, client: TestClient) -> None:
+        resp = client.get("/v1/admin/overview")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total_users" in data
+        assert "users" in data
+        assert "recent_jobs" in data

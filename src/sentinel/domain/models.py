@@ -170,6 +170,60 @@ class OnboardingStatus(BaseModel):
     completed_at: datetime | None = None
 
 
+class RiskAuditRecord(BaseModel):
+    """Serialized risk audit entry for dashboard and analytics views."""
+
+    audit_id: int | None = None
+    user_id: str
+    symbol: str
+    decision: Decision
+    risk_score: float = Field(..., ge=0.0, le=1.0)
+    size_multiplier: float = Field(..., ge=0.0, le=1.0)
+    mode: RiskMode = Field(default=RiskMode.NORMAL)
+    is_anomaly: bool = False
+    top_reason: str | None = None
+    explanation: list[FeatureContribution] = Field(default_factory=list)
+    latency_ms: float = Field(..., ge=0.0)
+    cached: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WorkspaceSummary(BaseModel):
+    """User-focused dashboard snapshot assembled from profile and audits."""
+
+    user_id: str
+    profile: UserBaseline
+    recent_audits: list[RiskAuditRecord] = Field(default_factory=list)
+    latest_assessment: RiskAuditRecord | None = None
+    decision_counts: dict[str, int] = Field(default_factory=dict)
+    average_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    average_latency_ms: float = Field(default=0.0, ge=0.0)
+    protection_events: int = Field(default=0, ge=0)
+    blank_baseline: bool = False
+
+
+class AdminUserRecord(BaseModel):
+    """Admin control-plane row for a single provisioned trader."""
+
+    user_id: str
+    broker_server: str | None = None
+    account_id: str | None = None
+    email: str | None = None
+    plan: str | None = None
+    provisioning_state: str | None = None
+    helm_release: str | None = None
+    trade_count: int = Field(default=0, ge=0)
+    is_baseline_ready: bool = False
+    model_s3_key: str | None = None
+    trained_at: datetime | None = None
+    latest_risk_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    latest_decision: Decision | None = None
+    latest_mode: RiskMode | None = None
+    last_audit_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class HistoricalTrade(BaseModel):
     """Normalized historical trade sent by the MT5 bridge."""
 
@@ -237,3 +291,17 @@ class ReadinessResponse(BaseModel):
     redis_connected: bool = False
     db_connected: bool = False
     details: dict[str, str] = Field(default_factory=dict)
+
+
+class AdminOverview(BaseModel):
+    """Aggregated fleet-level view for the admin dashboard."""
+
+    total_users: int = Field(default=0, ge=0)
+    baseline_ready_users: int = Field(default=0, ge=0)
+    active_api_credentials: int = Field(default=0, ge=0)
+    total_audits: int = Field(default=0, ge=0)
+    blocked_decisions: int = Field(default=0, ge=0)
+    reduced_decisions: int = Field(default=0, ge=0)
+    average_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    users: list[AdminUserRecord] = Field(default_factory=list)
+    recent_jobs: list[OnboardingStatus] = Field(default_factory=list)
