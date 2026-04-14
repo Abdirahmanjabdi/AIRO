@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckCircle2, LockKeyhole, Radar, ServerCog, Shield } from "lucide-react";
 
+import { toast } from "@/components/ui/sonner";
 import { sentinelApi, type OnboardingState } from "@/lib/api";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
 
@@ -72,6 +73,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
   const [brokerServer, setBrokerServer] = useState(identity?.brokerServer ?? "");
   const [accountId, setAccountId] = useState(identity?.accountId ?? "");
   const [readOnlyPassword, setReadOnlyPassword] = useState("");
+  const [minTrades, setMinTrades] = useState(100);
   const [stage, setStage] = useState<Stage>("IDLE");
   const [jobId, setJobId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -81,6 +83,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
   );
   const [logs, setLogs] = useState<string[]>([]);
   const [completionState, setCompletionState] = useState<"ready" | "blank_baseline" | null>(null);
+  const pollTokenRef = useRef(0);
 
   useEffect(() => {
     if (!identity) {
@@ -91,6 +94,12 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
     setBrokerServer(identity.brokerServer);
     setAccountId(identity.accountId);
   }, [identity]);
+
+  useEffect(() => {
+    return () => {
+      pollTokenRef.current += 1;
+    };
+  }, []);
 
   function appendLog(message: string) {
     setLogs((previous) => {
@@ -103,6 +112,8 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const pollToken = Date.now();
+    pollTokenRef.current = pollToken;
     setIsBusy(true);
     setError(null);
     setCompletionState(null);
@@ -131,6 +142,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
         user_id: userId,
         broker_server: brokerServer,
         account_id: accountId,
+        min_trades: minTrades,
       });
 
       setJobId(onboarding.job_id);
@@ -138,9 +150,20 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
       appendLog(`> ${onboarding.message}`);
 
       for (let attempt = 0; attempt < 90; attempt += 1) {
+        if (pollTokenRef.current !== pollToken) {
+          return;
+        }
+
         await sleep(attempt === 0 ? 400 : 2000);
+        if (pollTokenRef.current !== pollToken) {
+          return;
+        }
 
         const status = await sentinelApi.getOnboardingStatus(onboarding.job_id);
+        if (pollTokenRef.current !== pollToken) {
+          return;
+        }
+
         setStage(mapOnboardingState(status.state));
         setStatusMessage(status.message);
         appendLog(`> ${status.message}`);
@@ -150,6 +173,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
           setCompletionState("ready");
           setStage("LIVE");
           setIsBusy(false);
+          toast.success("Sentinel baseline is ready for live telemetry.");
           return;
         }
 
@@ -159,6 +183,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
           setStage("LIVE");
           setIsBusy(false);
           appendLog("> Blank baseline recorded. Monitoring can start while more history accumulates.");
+          toast.success("Blank baseline created. The account is connected and awaiting more history.");
           return;
         }
 
@@ -177,6 +202,11 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
       setStage("IDLE");
       setStatusMessage("Secure the MT5 bridge, verify history, and train a private baseline.");
       setIsBusy(false);
+      toast.error(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Unknown onboarding error.",
+      );
     }
   }
 
@@ -287,7 +317,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button
                   type="button"
-                  onClick={() => navigate("/")}
+                  onClick={() => navigate("/workspace")}
                   className="border border-secondary/40 bg-secondary/10 px-4 py-3 text-[11px] font-bold tracking-[0.18em] text-secondary transition-colors hover:bg-secondary/20"
                 >
                   OPEN COMMAND CENTER
@@ -323,59 +353,102 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground">
+                  <label
+                    htmlFor="onboarding-user-id"
+                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                  >
                     USER ID
                   </label>
                   <input
+                    id="onboarding-user-id"
                     type="text"
                     value={userId}
                     onChange={(event) => setUserId(event.target.value)}
                     required
+                    autoComplete="off"
+                    spellCheck={false}
                     className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
                     placeholder="whop-user-001"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground">
+                  <label
+                    htmlFor="onboarding-broker-server"
+                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                  >
                     BROKER SERVER
                   </label>
                   <input
+                    id="onboarding-broker-server"
                     type="text"
                     value={brokerServer}
                     onChange={(event) => setBrokerServer(event.target.value)}
                     required
+                    autoComplete="off"
+                    spellCheck={false}
                     className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
                     placeholder="ICMarkets-Demo"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground">
+                  <label
+                    htmlFor="onboarding-account-id"
+                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                  >
                     ACCOUNT ID
                   </label>
                   <input
+                    id="onboarding-account-id"
                     type="text"
                     value={accountId}
                     onChange={(event) => setAccountId(event.target.value)}
                     required
+                    autoComplete="off"
+                    inputMode="numeric"
+                    spellCheck={false}
                     className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
                     placeholder="12345678"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground">
+                  <label
+                    htmlFor="onboarding-password"
+                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                  >
                     READ-ONLY PASSWORD
                   </label>
                   <input
+                    id="onboarding-password"
                     type="password"
                     value={readOnlyPassword}
                     onChange={(event) => setReadOnlyPassword(event.target.value)}
                     required
+                    autoComplete="new-password"
                     className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
                     placeholder="Stored through Vault transit"
                   />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="onboarding-min-trades"
+                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                  >
+                    MINIMUM HISTORY
+                  </label>
+                  <select
+                    id="onboarding-min-trades"
+                    value={String(minTrades)}
+                    onChange={(event) => setMinTrades(Number(event.target.value))}
+                    className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                  >
+                    <option value="50">50 trades</option>
+                    <option value="100">100 trades</option>
+                    <option value="250">250 trades</option>
+                  </select>
                 </div>
               </div>
 

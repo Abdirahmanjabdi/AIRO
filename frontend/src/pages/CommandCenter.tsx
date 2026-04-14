@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 
 import RiskGauge from "@/components/RiskGauge";
 import MiniSparkline from "@/components/MiniSparkline";
+import { frontendEnv } from "@/lib/env";
 import type { ReadinessResponse, WorkspaceSummary } from "@/lib/api";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
 import {
@@ -43,17 +44,19 @@ export default function CommandCenter({
           </p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <Link
-              to="/onboarding"
+              to="/workspace/onboarding"
               className="border border-primary/50 bg-primary/10 px-4 py-3 text-center text-[11px] font-bold tracking-[0.18em] text-primary transition-colors hover:bg-primary/20"
             >
               START ONBOARDING
             </Link>
-            <Link
-              to="/admin"
-              className="border border-border px-4 py-3 text-center text-[11px] tracking-[0.18em] text-muted-foreground transition-colors hover:border-secondary/40 hover:text-secondary"
-            >
-              VIEW CONTROL PLANE
-            </Link>
+            {frontendEnv.adminEnabled ? (
+              <Link
+                to="/workspace/admin"
+                className="border border-border px-4 py-3 text-center text-[11px] tracking-[0.18em] text-muted-foreground transition-colors hover:border-secondary/40 hover:text-secondary"
+              >
+                VIEW CONTROL PLANE
+              </Link>
+            ) : null}
           </div>
         </div>
       </div>

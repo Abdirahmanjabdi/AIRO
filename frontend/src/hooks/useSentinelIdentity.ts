@@ -7,6 +7,12 @@ export interface SentinelIdentity {
 }
 
 const STORAGE_KEY = "sentinel-zero.identity";
+const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+
+interface StoredIdentity {
+  identity: SentinelIdentity;
+  savedAt: number;
+}
 
 function readStoredIdentity(): SentinelIdentity | null {
   if (typeof window === "undefined") {
@@ -19,11 +25,20 @@ function readStoredIdentity(): SentinelIdentity | null {
   }
 
   try {
-    const parsed = JSON.parse(raw) as SentinelIdentity;
-    if (!parsed.userId || !parsed.brokerServer || !parsed.accountId) {
+    const parsed = JSON.parse(raw) as StoredIdentity | SentinelIdentity;
+    const identity = "identity" in parsed ? parsed.identity : parsed;
+    const savedAt = "savedAt" in parsed ? parsed.savedAt : 0;
+
+    if (!identity.userId || !identity.brokerServer || !identity.accountId) {
       return null;
     }
-    return parsed;
+
+    if (savedAt && Date.now() - savedAt > MAX_AGE_MS) {
+      window.localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+
+    return identity;
   } catch {
     return null;
   }
@@ -38,7 +53,11 @@ export function useSentinelIdentity() {
     }
 
     if (identity) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
+      const payload: StoredIdentity = {
+        identity,
+        savedAt: Date.now(),
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       return;
     }
 

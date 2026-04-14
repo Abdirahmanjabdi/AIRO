@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { toast } from "@/components/ui/sonner";
 import { sentinelApi, type AnalyzeTradeRequest, type WorkspaceSummary } from "@/lib/api";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
 import {
@@ -29,6 +30,61 @@ const DEFAULT_TRADE: Omit<AnalyzeTradeRequest, "user_id"> = {
   trend_momentum: 0.11,
 };
 
+const PRESETS: Array<{
+  label: string;
+  description: string;
+  values: Omit<AnalyzeTradeRequest, "user_id">;
+}> = [
+  {
+    label: "Controlled Swing",
+    description: "Disciplined sizing with healthier risk-reward and low drawdown pressure.",
+    values: {
+      symbol: "EURUSD",
+      hour_decimal: 9.4,
+      losing_streak: 0,
+      drawdown_state: 3,
+      lot_deviation: 0.08,
+      revenge_timer: 180,
+      lots: 0.2,
+      rr_ratio: 2.4,
+      realized_vol_20: 0.009,
+      trend_momentum: 0.16,
+    },
+  },
+  {
+    label: "Revenge Burst",
+    description: "Escalating size after losses with a compressed timer between entries.",
+    values: {
+      symbol: "XAUUSD",
+      hour_decimal: 14.2,
+      losing_streak: 4,
+      drawdown_state: 19,
+      lot_deviation: 0.62,
+      revenge_timer: 18,
+      lots: 1.4,
+      rr_ratio: 1.1,
+      realized_vol_20: 0.021,
+      trend_momentum: -0.09,
+    },
+  },
+  {
+    label: "Volatility Spike",
+    description: "Market regime turns hostile while the trader keeps pushing size.",
+    values: {
+      symbol: "GBPJPY",
+      hour_decimal: 16.7,
+      losing_streak: 2,
+      drawdown_state: 11,
+      lot_deviation: 0.41,
+      revenge_timer: 36,
+      lots: 0.75,
+      rr_ratio: 1.4,
+      realized_vol_20: 0.031,
+      trend_momentum: 0.28,
+    },
+  },
+];
+
 export default function Trading({ identity, dashboard }: TradingProps) {
   const queryClient = useQueryClient();
   const [trade, setTrade] = useState(DEFAULT_TRADE);
@@ -52,7 +108,11 @@ export default function Trading({ identity, dashboard }: TradingProps) {
       if (!identity) {
         return;
       }
+      toast.success("Decision probe completed and audit feed refreshed.");
       await queryClient.invalidateQueries({ queryKey: ["sentinel", "dashboard", identity.userId] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Request failed.");
     },
   });
 
@@ -83,6 +143,24 @@ export default function Trading({ identity, dashboard }: TradingProps) {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <section className="border border-border/80 bg-card/75 p-4 backdrop-blur-xl sm:p-6">
+          <div className="mb-5 grid gap-3 lg:grid-cols-3">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => setTrade(preset.values)}
+                className="border border-border/80 bg-background/35 p-4 text-left transition-colors hover:border-primary/30 hover:bg-background/55"
+              >
+                <div className="text-[10px] uppercase tracking-[0.18em] text-secondary">
+                  {preset.label}
+                </div>
+                <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {preset.description}
+                </div>
+              </button>
+            ))}
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {[
               { key: "symbol", label: "SYMBOL", type: "text" },
@@ -114,6 +192,7 @@ export default function Trading({ identity, dashboard }: TradingProps) {
                       [field.key]: nextValue,
                     }));
                   }}
+                  spellCheck={false}
                   className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
                 />
               </div>

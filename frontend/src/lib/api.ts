@@ -154,6 +154,18 @@ export interface OnboardingRequest {
   min_trades?: number;
 }
 
+export class ApiError extends Error {
+  status: number;
+  payload?: unknown;
+
+  constructor(message: string, status: number, payload?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 function resolveApiBaseUrl(): string {
   const configured = import.meta.env.VITE_BRAIN_API_URL?.trim();
   if (configured) {
@@ -178,21 +190,69 @@ async function parseError(response: Response): Promise<never> {
       typeof payload?.detail === "string"
         ? payload.detail
         : JSON.stringify(payload);
-    throw new Error(detail || `Request failed with ${response.status}`);
+    throw new ApiError(detail || `Request failed with ${response.status}`, response.status, payload);
   }
 
   const text = await response.text();
-  throw new Error(text || `Request failed with ${response.status}`);
+  throw new ApiError(text || `Request failed with ${response.status}`, response.status, text);
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
+interface ApiRequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    clear() {
+      window.clearTimeout(timeout);
     },
-  });
+  };
+}
+
+async function apiRequest<T>(path: string, init?: ApiRequestOptions): Promise<T> {
+  const { timeoutMs = 15000, headers, signal, ...rest } = init || {};
+  const timeout = withTimeout(signal, timeoutMs);
+
+  const finalHeaders =
+    rest.body instanceof FormData
+      ? headers
+      : {
+          ...(rest.body ? { "Content-Type": "application/json" } : {}),
+          ...(headers || {}),
+        };
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...rest,
+      headers: finalHeaders,
+      signal: timeout.signal,
+    });
+  } catch (error) {
+    timeout.clear();
+
+    if (timeout.signal.aborted) {
+      throw new ApiError("Request timed out. Please try again.", 408);
+    }
+
+    const message = error instanceof Error ? error.message : "Network request failed.";
+    throw new ApiError(message, 0);
+  }
+
+  timeout.clear();
 
   if (!response.ok) {
     return parseError(response);
