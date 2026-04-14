@@ -1,5 +1,8 @@
 # Default values for sentinel-brain
-replicaCount: 2
+replicaCount: 1
+
+strategy:
+  type: Recreate
 
 image:
   repository: sentinel-airo/brain
@@ -9,22 +12,25 @@ image:
 service:
   type: ClusterIP
   port: 8000
+  annotations: {}
 
 resources:
   requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
     cpu: "500m"
     memory: "512Mi"
-  limits:
-    cpu: "1000m"
-    memory: "1Gi"
 
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 20
+  minReplicas: 1
+  maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-  targetRequestsPerSecond: "50"
-  targetLatencyP99Ms: 100
+  customMetrics:
+    enabled: false
+    targetRequestsPerSecond: "50"
+    targetLatencyP99Ms: 100
 
 env:
   REDIS_URL: "redis://sentinel-redis:6379/0"
@@ -32,14 +38,20 @@ env:
   S3_ENDPOINT: "https://s3.amazonaws.com"
   S3_BUCKET: "sentinel-models"
   VAULT_ADDR: "https://vault.sentinel.internal:8200"
+  SENTINEL_REQUIRE_VAULT: "true"
   CORS_ORIGINS: "https://app.sentinel.io"
+
+envFromSecrets:
+  - sentinel-brain-runtime
 
 probes:
   liveness:
     path: /healthz
-    initialDelaySeconds: 10
+    initialDelaySeconds: 75
     periodSeconds: 15
+    timeoutSeconds: 2
   readiness:
     path: /readyz
-    initialDelaySeconds: 15
+    initialDelaySeconds: 45
     periodSeconds: 10
+    timeoutSeconds: 2

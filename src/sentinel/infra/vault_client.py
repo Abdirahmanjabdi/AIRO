@@ -19,6 +19,13 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only if optional dep
 logger = logging.getLogger(__name__)
 
 
+def _read_bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class VaultManager:
     """
     HashiCorp Vault wrapper for MT5 credential storage.
@@ -72,6 +79,37 @@ class VaultManager:
         if not self.client.is_authenticated():
             logger.warning("Vault is not authenticated. Falling back to in-memory credential store.")
             self.client = None
+
+    def is_authenticated(self) -> bool:
+        if self.client is None:
+            return False
+        try:
+            return bool(self.client.is_authenticated())
+        except Exception:
+            logger.warning("Vault authentication status check failed", exc_info=True)
+            return False
+
+    def is_healthy(self) -> bool:
+        if not self.is_authenticated():
+            return False
+        try:
+            self.client.sys.read_health_status(method="GET")  # type: ignore[union-attr]
+            return True
+        except Exception:
+            logger.warning("Vault health check failed", exc_info=True)
+            return False
+
+    def using_fallback(self) -> bool:
+        return self.client is None
+
+    def require_vault_enabled(self) -> bool:
+        return _read_bool_env("SENTINEL_REQUIRE_VAULT", default=False)
+
+    def _assert_production_vault(self, operation: str) -> None:
+        if self.require_vault_enabled() and self.client is None:
+            raise RuntimeError(
+                f"Vault is required for {operation}, but no authenticated Vault client is available."
+            )
 
     def _ensure_secret_engines(self) -> None:
         if self.client is None:
@@ -141,6 +179,7 @@ class VaultManager:
         login_id: int,
         password_readonly: str,
     ) -> None:
+        self._assert_production_vault("credential storage")
         payload = {
             "server": server,
             "login": login_id,
@@ -157,6 +196,7 @@ class VaultManager:
         )
 
     def fetch_broker_credentials(self, user_id: str) -> dict[str, Any]:
+        self._assert_production_vault("credential retrieval")
         if self.client is None:
             if user_id not in self._memory_store:
                 raise KeyError(f"No broker credentials found for {user_id}")

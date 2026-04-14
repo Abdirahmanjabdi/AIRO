@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sentinel-vault
+description: Internal Vault deployment for Sentinel-Zero broker credential storage
+type: application
+version: 0.1.0
+appVersion: "1.16.2"

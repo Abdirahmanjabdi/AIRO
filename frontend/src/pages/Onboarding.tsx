@@ -1,15 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, LockKeyhole, Radar, ServerCog, Shield } from "lucide-react";
+import {
+  Activity,
+  CheckCircle2,
+  LockKeyhole,
+  Radar,
+  ServerCog,
+  Shield,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 
+import MetricCard from "@/components/MetricCard";
+import Reveal from "@/components/Reveal";
+import SectionHeader from "@/components/SectionHeader";
+import SurfacePanel from "@/components/SurfacePanel";
 import { toast } from "@/components/ui/sonner";
-import { sentinelApi, type OnboardingState } from "@/lib/api";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
+import { sentinelApi, type OnboardingState } from "@/lib/api";
 
 type Stage = "IDLE" | "VAULT" | "PROVISIONING" | "SYNC" | "AUDIT" | "LIVE";
 
+type StepKey = Exclude<Stage, "IDLE" | "LIVE">;
+
 const STEPS: Array<{
-  key: Exclude<Stage, "IDLE" | "LIVE">;
+  key: StepKey;
   label: string;
   description: string;
   icon: typeof LockKeyhole;
@@ -40,6 +55,21 @@ const STEPS: Array<{
   },
 ];
 
+const STORAGE_FACTS = [
+  {
+    title: "Vault transit",
+    detail: "Stores the read-only password path and encryption boundary.",
+  },
+  {
+    title: "Postgres",
+    detail: "Keeps user metadata, onboarding jobs, and audit-ready state only.",
+  },
+  {
+    title: "S3 / MinIO",
+    detail: "Receives the personalized model artifact after baseline training.",
+  },
+];
+
 function mapOnboardingState(state: OnboardingState): Stage {
   switch (state) {
     case "pending":
@@ -58,13 +88,37 @@ function mapOnboardingState(state: OnboardingState): Stage {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function stageTone(stage: Stage, hasError: boolean): {
+  accent: "neutral" | "primary" | "secondary" | "danger";
+  label: string;
+} {
+  if (hasError) {
+    return { accent: "danger", label: "Needs operator attention" };
+  }
+
+  switch (stage) {
+    case "LIVE":
+      return { accent: "secondary", label: "Live and monitoring" };
+    case "VAULT":
+      return { accent: "primary", label: "Securing credentials" };
+    case "PROVISIONING":
+      return { accent: "primary", label: "Provisioning the bridge" };
+    case "SYNC":
+      return { accent: "primary", label: "Syncing broker history" };
+    case "AUDIT":
+      return { accent: "secondary", label: "Training the baseline" };
+    default:
+      return { accent: "neutral", label: "Waiting for initialization" };
+  }
+}
+
 interface OnboardingProps {
   identity: SentinelIdentity | null;
   onConnected: (identity: SentinelIdentity) => void;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export default function Onboarding({ identity, onConnected }: OnboardingProps) {
@@ -211,310 +265,434 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
   }
 
   const currentStepIndex = STEPS.findIndex((stepItem) => stepItem.key === stage);
+  const progressPercent =
+    stage === "LIVE"
+      ? 100
+      : currentStepIndex >= 0
+        ? ((currentStepIndex + 1) / STEPS.length) * 100
+        : 6;
+  const tone = stageTone(stage, Boolean(error));
 
   return (
-    <div className="mx-auto max-w-5xl py-4 sm:py-8">
-      <div className="mb-8">
-        <h1 className="font-display text-2xl font-bold tracking-wide text-foreground">
-          SENTINEL ONBOARDING
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          This flow stores the read-only MT5 password in Vault, queues the MT5 bridge,
-          pulls broker history, and trains an identity-bound baseline.
-        </p>
-      </div>
-
-      <div className="mb-8 grid gap-3 border border-border/80 bg-card/75 p-3 backdrop-blur-xl md:grid-cols-4">
-        {STEPS.map((stepItem, index) => {
-          const isComplete =
-            stage === "LIVE" || (currentStepIndex >= 0 && index < currentStepIndex);
-          const isActive = stepItem.key === stage;
-          const Icon = isComplete ? CheckCircle2 : stepItem.icon;
-
-          return (
-            <div
-              key={stepItem.key}
-              className={`rounded-none border p-3 transition-colors ${
-                isActive
-                  ? "border-primary/60 bg-primary/10"
-                  : isComplete
-                    ? "border-secondary/40 bg-secondary/5"
-                    : "border-border/80 bg-background/40"
-              }`}
-            >
-              <div className="mb-3 flex items-center gap-2">
-                <Icon
-                  size={16}
-                  className={
-                    isComplete
-                      ? "text-secondary"
-                      : isActive
-                        ? "text-primary"
-                        : "text-muted-foreground"
-                  }
-                />
-                <span
-                  className={`text-[11px] font-bold tracking-[0.18em] ${
-                    isComplete
-                      ? "text-secondary"
-                      : isActive
-                        ? "text-primary"
-                        : "text-muted-foreground"
-                  }`}
-                >
-                  {stepItem.label}
+    <div className="space-y-6">
+      <Reveal>
+        <SectionHeader
+          eyebrow="Workspace / Onboarding"
+          title="Seal the MT5 bridge, train the baseline, and open the live lane."
+          description="This onboarding flow describes the actual control plane path: encrypt credentials in Vault, queue the MT5 bridge, verify broker history, and persist a personalized model artifact for the connected trader."
+          aside={(
+            <SurfacePanel accent={tone.accent} className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+                    Current lane
+                  </div>
+                  <div className="mt-2 font-display text-2xl font-bold text-foreground">
+                    {stage === "IDLE" ? "Idle" : stage === "LIVE" ? "Live" : stage}
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-2 border border-border/70 bg-background/35 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <Activity size={12} />
+                  {tone.label}
                 </span>
               </div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {stepItem.description}
-              </p>
-            </div>
-          );
-        })}
-      </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="border border-border/80 bg-card/75 p-4 backdrop-blur-xl sm:p-6">
-          {completionState ? (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="text-secondary" size={20} />
-                <div>
-                  <h2 className="font-display text-xl font-bold text-foreground">
-                    {completionState === "ready"
-                      ? "Baseline Ready"
-                      : "Blank Baseline Created"}
-                  </h2>
-                  <p className="text-sm text-muted-foreground">
-                    {completionState === "ready"
-                      ? "The model is persisted and the command center is ready for live telemetry."
-                      : "The account has no broker history yet, so Sentinel will stay baseline-pending until more trades arrive."}
-                  </p>
+              <div className="mt-5">
+                <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <span>Pipeline progress</span>
+                  <span>{Math.round(progressPercent)}%</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden border border-border/70 bg-background/40">
+                  <div
+                    className="h-full bg-[linear-gradient(90deg,rgba(78,205,196,0.9),rgba(245,166,35,0.9))] transition-[width] duration-500"
+                    style={{ width: `${progressPercent}%` }}
+                  />
                 </div>
               </div>
 
-              <div className="grid gap-3 border border-border/80 bg-background/40 p-4 sm:grid-cols-3">
-                <div>
-                  <span className="block text-[10px] tracking-[0.15em] text-muted-foreground">
-                    USER ID
+              <div className="mt-5 text-sm leading-7 text-muted-foreground">{statusMessage}</div>
+            </SurfacePanel>
+          )}
+        />
+      </Reveal>
+
+      <Reveal delay={0.05}>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Zero-trust storage"
+            value="Vault"
+            description="Credentials move from browser to Vault transit before the bridge sees them."
+            accent="secondary"
+            icon={<LockKeyhole size={18} />}
+            valueClassName="text-xl text-secondary"
+          />
+          <MetricCard
+            label="History target"
+            value={`${minTrades} trades`}
+            description="Minimum broker history required before the baseline graduates from onboarding."
+            accent="primary"
+            icon={<Radar size={18} />}
+            valueClassName="text-xl text-primary"
+          />
+          <MetricCard
+            label="Job handle"
+            value={jobId ? jobId.slice(0, 8) : "Queued at submit"}
+            description="A live onboarding job id appears here once the backend accepts the request."
+            accent="neutral"
+            icon={<ServerCog size={18} />}
+            valueClassName="text-xl text-foreground"
+          />
+          <MetricCard
+            label="Activity feed"
+            value={`${logs.length}`}
+            description="Runtime messages from Vault, the bridge, and model training accumulate here."
+            accent={logs.length > 0 ? "secondary" : "neutral"}
+            icon={<Sparkles size={18} />}
+          />
+        </div>
+      </Reveal>
+
+      <Reveal delay={0.1}>
+        <div className="grid gap-4 xl:grid-cols-4">
+          {STEPS.map((stepItem, index) => {
+            const isComplete = stage === "LIVE" || (currentStepIndex >= 0 && index < currentStepIndex);
+            const isActive = stepItem.key === stage;
+            const Icon = isComplete ? CheckCircle2 : stepItem.icon;
+
+            return (
+              <SurfacePanel
+                key={stepItem.key}
+                accent={isActive ? "primary" : isComplete ? "secondary" : "neutral"}
+                className="p-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    0{index + 1}
+                  </div>
+                  <Icon
+                    size={18}
+                    className={
+                      isComplete
+                        ? "text-secondary"
+                        : isActive
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                    }
+                  />
+                </div>
+                <div className="mt-6 font-display text-xl font-bold text-foreground">
+                  {stepItem.label}
+                </div>
+                <div className="mt-3 text-sm leading-7 text-muted-foreground">
+                  {stepItem.description}
+                </div>
+              </SurfacePanel>
+            );
+          })}
+        </div>
+      </Reveal>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_400px]">
+        <Reveal delay={0.15}>
+          <SurfacePanel className="p-6 sm:p-7">
+            {completionState ? (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="mt-1 text-secondary" size={22} />
+                    <div>
+                      <div className="eyebrow-label">Onboarding complete</div>
+                      <h2 className="mt-3 font-display text-3xl font-bold text-foreground">
+                        {completionState === "ready" ? "Baseline ready for live telemetry." : "Blank baseline created safely."}
+                      </h2>
+                      <p className="mt-3 max-w-2xl text-sm leading-8 text-muted-foreground">
+                        {completionState === "ready"
+                          ? "The model is persisted, the trader identity is connected, and the workspace can now read real risk telemetry from the live backend."
+                          : "The broker history came back empty, so Sentinel recorded a blank baseline instead of crashing. Monitoring can begin while more history accumulates."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="inline-flex items-center gap-2 border border-secondary/30 bg-secondary/10 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-secondary">
+                    <ShieldCheck size={14} />
+                    Ready for workspace
                   </span>
-                  <span className="text-sm font-bold text-foreground">{userId}</span>
                 </div>
-                <div>
-                  <span className="block text-[10px] tracking-[0.15em] text-muted-foreground">
-                    SERVER
-                  </span>
-                  <span className="text-sm font-bold text-foreground">{brokerServer}</span>
-                </div>
-                <div>
-                  <span className="block text-[10px] tracking-[0.15em] text-muted-foreground">
-                    ACCOUNT
-                  </span>
-                  <span className="text-sm font-bold text-foreground">{accountId}</span>
-                </div>
-              </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => navigate("/workspace")}
-                  className="border border-secondary/40 bg-secondary/10 px-4 py-3 text-[11px] font-bold tracking-[0.18em] text-secondary transition-colors hover:bg-secondary/20"
-                >
-                  OPEN COMMAND CENTER
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCompletionState(null);
-                    setReadOnlyPassword("");
-                    setLogs([]);
-                    setStatusMessage(
-                      "Secure the MT5 bridge, verify history, and train a private baseline.",
-                    );
-                    setStage("IDLE");
-                  }}
-                  className="border border-border px-4 py-3 text-[11px] tracking-[0.18em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                >
-                  RUN AGAIN
-                </button>
-              </div>
-            </div>
-          ) : (
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <div>
-                <h2 className="font-display text-lg font-bold tracking-wide text-foreground">
-                  Secure the Broker Link
-                </h2>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  The password is stored only in Vault. Postgres receives metadata and job
-                  state, never the secret itself.
-                </p>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="onboarding-user-id"
-                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
-                  >
-                    USER ID
-                  </label>
-                  <input
-                    id="onboarding-user-id"
-                    type="text"
+                <div className="grid gap-4 md:grid-cols-3">
+                  <MetricCard
+                    label="User id"
                     value={userId}
-                    onChange={(event) => setUserId(event.target.value)}
-                    required
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
-                    placeholder="whop-user-001"
+                    description="Identity bound to the saved baseline."
+                    accent="neutral"
+                    valueClassName="text-lg break-all text-foreground"
                   />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="onboarding-broker-server"
-                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
-                  >
-                    BROKER SERVER
-                  </label>
-                  <input
-                    id="onboarding-broker-server"
-                    type="text"
+                  <MetricCard
+                    label="Broker server"
                     value={brokerServer}
-                    onChange={(event) => setBrokerServer(event.target.value)}
-                    required
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
-                    placeholder="ICMarkets-Demo"
+                    description="Broker endpoint used during verification."
+                    accent="secondary"
+                    valueClassName="text-lg break-all text-secondary"
                   />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="onboarding-account-id"
-                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
-                  >
-                    ACCOUNT ID
-                  </label>
-                  <input
-                    id="onboarding-account-id"
-                    type="text"
+                  <MetricCard
+                    label="Account id"
                     value={accountId}
-                    onChange={(event) => setAccountId(event.target.value)}
-                    required
-                    autoComplete="off"
-                    inputMode="numeric"
-                    spellCheck={false}
-                    className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
-                    placeholder="12345678"
+                    description="MT5 account associated with this onboarding run."
+                    accent="primary"
+                    valueClassName="text-lg break-all text-primary"
                   />
                 </div>
 
-                <div>
-                  <label
-                    htmlFor="onboarding-password"
-                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => navigate("/workspace")}
+                    className="inline-flex items-center justify-center gap-2 border border-secondary/35 bg-secondary/10 px-5 py-3 text-[11px] font-bold tracking-[0.18em] text-secondary transition-colors hover:bg-secondary/20"
                   >
-                    READ-ONLY PASSWORD
-                  </label>
-                  <input
-                    id="onboarding-password"
-                    type="password"
-                    value={readOnlyPassword}
-                    onChange={(event) => setReadOnlyPassword(event.target.value)}
-                    required
-                    autoComplete="new-password"
-                    className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
-                    placeholder="Stored through Vault transit"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="onboarding-min-trades"
-                    className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    OPEN COMMAND CENTER
+                    <Sparkles size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCompletionState(null);
+                      setReadOnlyPassword("");
+                      setLogs([]);
+                      setStatusMessage(
+                        "Secure the MT5 bridge, verify history, and train a private baseline.",
+                      );
+                      setStage("IDLE");
+                    }}
+                    className="border border-border px-5 py-3 text-[11px] tracking-[0.18em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
                   >
-                    MINIMUM HISTORY
-                  </label>
-                  <select
-                    id="onboarding-min-trades"
-                    value={String(minTrades)}
-                    onChange={(event) => setMinTrades(Number(event.target.value))}
-                    className="h-10 w-full border border-border bg-background/70 px-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
-                  >
-                    <option value="50">50 trades</option>
-                    <option value="100">100 trades</option>
-                    <option value="250">250 trades</option>
-                  </select>
+                    RUN AGAIN
+                  </button>
                 </div>
               </div>
+            ) : (
+              <form className="space-y-6" onSubmit={handleSubmit}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <div className="eyebrow-label">Secure the broker link</div>
+                    <h2 className="mt-3 font-display text-3xl font-bold text-foreground">
+                      Connect the trader once, then let the control plane do the hard part.
+                    </h2>
+                    <p className="mt-3 max-w-2xl text-sm leading-8 text-muted-foreground">
+                      The password is stored only in Vault. Postgres receives metadata and job
+                      state, never the secret itself.
+                    </p>
+                  </div>
 
-              <div className="border border-border/80 bg-background/40 p-4 text-sm text-muted-foreground">
-                <div className="mb-2 flex items-center gap-2 text-secondary">
-                  <Shield size={16} />
-                  <span className="text-[11px] font-bold tracking-[0.18em]">
+                  <span className="inline-flex items-center gap-2 border border-border/70 bg-background/35 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    <Shield size={13} />
                     ZERO-TRUST STORAGE
                   </span>
                 </div>
-                Credentials move from the browser to Vault and from Vault to the bridge. They
-                are not stored in plain text in Postgres, Redis, or audit logs.
-              </div>
 
-              {error ? (
-                <div className="border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  {error}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="onboarding-user-id"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      USER ID
+                    </label>
+                    <input
+                      id="onboarding-user-id"
+                      type="text"
+                      value={userId}
+                      onChange={(event) => setUserId(event.target.value)}
+                      required
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                      placeholder="whop-user-001"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="onboarding-broker-server"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      BROKER SERVER
+                    </label>
+                    <input
+                      id="onboarding-broker-server"
+                      type="text"
+                      value={brokerServer}
+                      onChange={(event) => setBrokerServer(event.target.value)}
+                      required
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                      placeholder="ICMarkets-Demo"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="onboarding-account-id"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      ACCOUNT ID
+                    </label>
+                    <input
+                      id="onboarding-account-id"
+                      type="text"
+                      value={accountId}
+                      onChange={(event) => setAccountId(event.target.value)}
+                      required
+                      autoComplete="off"
+                      inputMode="numeric"
+                      spellCheck={false}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                      placeholder="12345678"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="onboarding-password"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      READ-ONLY PASSWORD
+                    </label>
+                    <input
+                      id="onboarding-password"
+                      type="password"
+                      value={readOnlyPassword}
+                      onChange={(event) => setReadOnlyPassword(event.target.value)}
+                      required
+                      autoComplete="new-password"
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                      placeholder="Stored through Vault transit"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="onboarding-min-trades"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      MINIMUM HISTORY
+                    </label>
+                    <select
+                      id="onboarding-min-trades"
+                      value={String(minTrades)}
+                      onChange={(event) => setMinTrades(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    >
+                      <option value="50">50 trades</option>
+                      <option value="100">100 trades</option>
+                      <option value="250">250 trades</option>
+                    </select>
+                  </div>
                 </div>
-              ) : null}
 
-              <button
-                type="submit"
-                disabled={
-                  isBusy ||
-                  !userId.trim() ||
-                  !brokerServer.trim() ||
-                  !accountId.trim() ||
-                  !readOnlyPassword.trim()
-                }
-                className="w-full border border-primary/50 bg-primary/10 px-4 py-3 text-[11px] font-bold tracking-[0.18em] text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {isBusy ? "ONBOARDING IN PROGRESS" : "INITIALIZE SENTINEL"}
-              </button>
-            </form>
-          )}
-        </section>
+                <SurfacePanel accent="secondary" className="p-5">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-secondary">
+                    ZERO-TRUST STORAGE
+                  </div>
+                  <div className="mt-3 text-sm leading-8 text-muted-foreground">
+                    Credentials move from the browser to Vault and from Vault to the bridge.
+                    They are not stored in plain text in Postgres, Redis, or audit logs.
+                  </div>
+                </SurfacePanel>
 
-        <aside className="border border-border/80 bg-card/75 p-4 backdrop-blur-xl sm:p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-display text-lg font-bold text-foreground">Onboarding Feed</h3>
-            {jobId ? (
-              <span className="text-[10px] tracking-[0.15em] text-muted-foreground">
-                {jobId.slice(0, 8)}
-              </span>
-            ) : null}
-          </div>
+                {error ? (
+                  <SurfacePanel accent="danger" className="p-4 text-sm leading-7 text-destructive">
+                    {error}
+                  </SurfacePanel>
+                ) : null}
 
-          <p className="mb-4 text-sm leading-relaxed text-muted-foreground">
-            {statusMessage}
-          </p>
-
-          <div className="max-h-[420px] space-y-2 overflow-y-auto border border-border/80 bg-background/40 p-3 font-mono text-[11px]">
-            {logs.length === 0 ? (
-              <div className="text-muted-foreground/70">
-                Runtime messages will appear here as Vault, the bridge, and the brain move the
-                job forward.
-              </div>
-            ) : (
-              logs.map((line, index) => (
-                <div key={`${line}-${index}`} className="text-muted-foreground">
-                  {line}
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="submit"
+                    disabled={
+                      isBusy ||
+                      !userId.trim() ||
+                      !brokerServer.trim() ||
+                      !accountId.trim() ||
+                      !readOnlyPassword.trim()
+                    }
+                    className="inline-flex items-center justify-center gap-2 border border-primary/40 bg-primary/10 px-5 py-3 text-[11px] font-bold tracking-[0.18em] text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isBusy ? "ONBOARDING IN PROGRESS" : "INITIALIZE SENTINEL"}
+                    <Sparkles size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReadOnlyPassword("");
+                      setError(null);
+                      setStage("IDLE");
+                      setLogs([]);
+                      setJobId(null);
+                      setStatusMessage(
+                        "Secure the MT5 bridge, verify history, and train a private baseline.",
+                      );
+                    }}
+                    className="border border-border px-5 py-3 text-[11px] tracking-[0.18em] text-muted-foreground transition-colors hover:border-secondary/40 hover:text-secondary"
+                  >
+                    RESET FORM
+                  </button>
                 </div>
-              ))
+              </form>
             )}
+          </SurfacePanel>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <div className="space-y-4">
+            <SurfacePanel accent="primary" className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="eyebrow-label">Onboarding feed</div>
+                  <div className="mt-2 text-sm leading-7 text-muted-foreground">
+                    Live runtime messages from Vault, the bridge, and baseline training.
+                  </div>
+                </div>
+                {jobId ? (
+                  <span className="border border-border/70 bg-background/35 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {jobId.slice(0, 8)}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-5 max-h-[420px] space-y-2 overflow-y-auto border border-border/70 bg-background/35 p-4 font-mono text-[11px] leading-6">
+                {logs.length === 0 ? (
+                  <div className="text-muted-foreground/70">
+                    Runtime messages will appear here as Vault, the bridge, and the brain move the
+                    job forward.
+                  </div>
+                ) : (
+                  logs.map((line, index) => (
+                    <div key={`${line}-${index}`} className="text-muted-foreground">
+                      {line}
+                    </div>
+                  ))
+                )}
+              </div>
+            </SurfacePanel>
+
+            <SurfacePanel className="p-5">
+              <div className="eyebrow-label">What gets written where</div>
+              <div className="mt-4 space-y-4">
+                {STORAGE_FACTS.map((fact) => (
+                  <div key={fact.title} className="border border-border/70 bg-background/35 p-4">
+                    <div className="text-[11px] font-bold tracking-[0.16em] text-foreground">
+                      {fact.title}
+                    </div>
+                    <div className="mt-2 text-sm leading-7 text-muted-foreground">
+                      {fact.detail}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SurfacePanel>
           </div>
-        </aside>
+        </Reveal>
       </div>
     </div>
   );

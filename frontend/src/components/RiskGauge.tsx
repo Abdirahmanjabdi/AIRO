@@ -1,9 +1,12 @@
+import { useId } from "react";
+
 interface Props {
   score: number;
   threshold: number;
 }
 
 export default function RiskGauge({ score, threshold }: Props) {
+  const glowId = useId();
   const size = 340;
   const cx = size / 2;
   const cy = size / 2 + 10;
@@ -30,7 +33,6 @@ export default function RiskGauge({ score, threshold }: Props) {
   const thresholdAngle = startAngle - threshold * totalSweep;
   const isAlert = score > threshold;
   const fillColor = isAlert ? '#E63946' : score > 0.4 ? '#F5A623' : '#4ECDC4';
-  const glowId = `gauge-glow-${Math.random().toString(36).slice(2, 6)}`;
 
   // Tick marks every 0.05 (20 ticks)
   const ticks = [];
@@ -79,7 +81,14 @@ export default function RiskGauge({ score, threshold }: Props) {
             <feGaussianBlur stdDeviation="4" result="blur" />
             <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
+          <linearGradient id={`${glowId}-ring`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#111827" />
+            <stop offset="100%" stopColor="#0b1220" />
+          </linearGradient>
         </defs>
+
+        <circle cx={cx} cy={cy} r={innerR - 16} fill={`url(#${glowId}-ring)`} opacity={0.92} />
+        <circle cx={cx} cy={cy} r={innerR - 2} fill="none" stroke="rgba(255,255,255,0.05)" />
 
         {/* Outer ring ticks */}
         {ticks}
@@ -151,6 +160,18 @@ export default function RiskGauge({ score, threshold }: Props) {
           opacity={0.8}
         >
           THRESHOLD: {threshold.toFixed(4)}
+        </text>
+
+        <text
+          x={cx}
+          y={cy + 70}
+          textAnchor="middle"
+          fill="hsl(220 8% 44%)"
+          fontSize="8"
+          fontFamily="Space Mono, monospace"
+          letterSpacing="0.22em"
+        >
+          PERSONALIZED MODEL
         </text>
       </svg>
     </div>

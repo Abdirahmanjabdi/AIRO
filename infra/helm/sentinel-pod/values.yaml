@@ -20,6 +20,10 @@ resources:
 env:
   BRAIN_API_URL: "http://sentinel-brain:8000"
   VAULT_ADDR: "https://vault.sentinel.internal:8200"
+  SENTINEL_REQUIRE_VAULT: "true"
+
+envFromSecrets:
+  - sentinel-pod-runtime
 
 priorityClass:
   create: true

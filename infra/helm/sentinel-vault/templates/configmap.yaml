@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-vault-config
+data:
+  vault.hcl: |
+    ui = {{ ternary "true" "false" .Values.config.ui }}
+    log_level = {{ .Values.config.logLevel | quote }}
+    disable_mlock = {{ ternary "true" "false" .Values.config.disableMlock }}
+
+    listener "tcp" {
+      address = "0.0.0.0:{{ .Values.service.port }}"
+      cluster_address = "0.0.0.0:{{ .Values.service.clusterPort }}"
+      tls_disable = {{ ternary "1" "0" .Values.config.tlsDisable }}
+    }
+
+    storage "raft" {
+      path = "/vault/data"
+      node_id = "{{ .Release.Name }}-0"
+    }
+
+    api_addr = "http://{{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}"
+    cluster_addr = "http://{{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.clusterPort }}"

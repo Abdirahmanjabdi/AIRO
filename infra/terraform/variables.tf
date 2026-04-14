@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region for the cluster"
   type        = string
-  default     = "eu-west-2"  # London (LD4 proximity)
+  default     = "eu-west-2" # London (LD4 proximity)
 }
 
 variable "environment" {
@@ -42,7 +42,7 @@ variable "public_subnet_cidrs" {
 variable "rds_instance_class" {
   description = "RDS instance class"
   type        = string
-  default     = "db.t4g.medium"
+  default     = "db.t3.micro"
 }
 
 variable "redis_node_type" {

@@ -73,7 +73,7 @@ describe("frontend product shell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("ZERO-TRUST STORAGE")).toBeInTheDocument();
+    expect(screen.getAllByText("ZERO-TRUST STORAGE")).toHaveLength(2);
     expect(screen.getByLabelText("MINIMUM HISTORY")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "100 trades" })).toBeInTheDocument();
   });

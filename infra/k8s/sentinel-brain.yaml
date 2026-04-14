@@ -3,8 +3,14 @@ kind: Deployment
 metadata:
   name: sentinel-brain
   namespace: default
+  labels:
+    app: sentinel-brain
+    component: control-plane
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: sentinel-brain
@@ -12,9 +18,79 @@ spec:
     metadata:
       labels:
         app: sentinel-brain
+        component: control-plane
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: brain
-        image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
+        image: 745318019312.dkr.ecr.eu-west-2.amazonaws.com/sentinel-brain:latest
+        imagePullPolicy: Always
+        env:
+        - name: SENTINEL_MODEL_PATH
+          value: /app/default_model.joblib
+        - name: AWS_DEFAULT_REGION
+          value: eu-west-2
+        envFrom:
+        - secretRef:
+            name: sentinel-brain-runtime
+            optional: true
         ports:
         - containerPort: 8000
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8000
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 75
+          periodSeconds: 15
+          timeoutSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-brain
+  namespace: default
+  labels:
+    app: sentinel-brain
+spec:
+  type: LoadBalancer
+  selector:
+    app: sentinel-brain
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sentinel-brain
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sentinel-brain
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

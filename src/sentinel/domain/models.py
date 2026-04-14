@@ -290,6 +290,8 @@ class ReadinessResponse(BaseModel):
     model_loaded: bool = False
     redis_connected: bool = False
     db_connected: bool = False
+    vault_connected: bool = False
+    vault_required: bool = False
     details: dict[str, str] = Field(default_factory=dict)
 
 

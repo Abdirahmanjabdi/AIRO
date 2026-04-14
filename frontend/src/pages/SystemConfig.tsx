@@ -1,3 +1,9 @@
+import { Binary, Cloud, DatabaseZap, ShieldCheck } from "lucide-react";
+
+import MetricCard from "@/components/MetricCard";
+import Reveal from "@/components/Reveal";
+import SectionHeader from "@/components/SectionHeader";
+import SurfacePanel from "@/components/SurfacePanel";
 import type { ReadinessResponse, WorkspaceSummary } from "@/lib/api";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
 
@@ -48,55 +54,93 @@ export default function SystemConfig({
   ];
 
   return (
-    <div className="space-y-5 max-w-4xl">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-wide text-foreground">
-          SYSTEM CONFIGURATION
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Runtime configuration exposed from the real control plane. This page is read-only on
-          purpose so the browser cannot drift from backend truth.
-        </p>
-      </div>
+    <div className="space-y-6 max-w-6xl">
+      <Reveal>
+        <SectionHeader
+          eyebrow="Workspace / Runtime"
+          title="System configuration and runtime truth"
+          description="Read-only runtime configuration exposed from the live control plane. This surface intentionally reflects backend truth instead of letting the browser drift into its own config state."
+        />
+      </Reveal>
 
-      <div className="divide-y divide-border border border-border/80 bg-card/75 backdrop-blur-xl">
-        {rows.map((row) => (
-          <div
-            key={row.key}
-            className="flex flex-col gap-3 px-5 py-4 transition-colors hover:bg-background/35 sm:flex-row sm:items-start sm:justify-between"
-          >
-            <div className="sm:max-w-[60%]">
-              <div className="text-[12px] font-bold tracking-[0.12em] text-foreground">
-                {row.key}
+      <Reveal delay={0.05}>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="API target"
+            value="Brain API"
+            description={apiBaseUrl}
+            accent="primary"
+            icon={<Cloud size={18} />}
+            valueClassName="text-xl text-primary"
+          />
+          <MetricCard
+            label="Redis"
+            value={readiness?.redis_connected ? "Connected" : "Watching"}
+            description="Runtime cache state surfaced from readiness."
+            accent={readiness?.redis_connected ? "secondary" : "danger"}
+            icon={<DatabaseZap size={18} />}
+            valueClassName={readiness?.redis_connected ? "text-secondary text-xl" : "text-destructive text-xl"}
+          />
+          <MetricCard
+            label="Model load"
+            value={readiness?.model_loaded ? "Loaded" : "Not ready"}
+            description="Whether the runtime has a model path ready to serve."
+            accent={readiness?.model_loaded ? "secondary" : "primary"}
+            icon={<ShieldCheck size={18} />}
+            valueClassName={readiness?.model_loaded ? "text-secondary text-xl" : "text-primary text-xl"}
+          />
+          <MetricCard
+            label="Indexed trades"
+            value={dashboard?.profile.trade_count ?? 0}
+            description="Trades captured into the user’s current baseline metadata."
+            accent="neutral"
+            icon={<Binary size={18} />}
+          />
+        </div>
+      </Reveal>
+
+      <Reveal delay={0.1}>
+        <SurfacePanel className="divide-y divide-border/70">
+          {rows.map((row) => (
+            <div
+              key={row.key}
+              className="flex flex-col gap-3 px-5 py-5 transition-colors hover:bg-background/25 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="sm:max-w-[58%]">
+                <div className="text-[12px] font-bold tracking-[0.16em] text-foreground">
+                  {row.key}
+                </div>
+                <div className="mt-2 text-sm leading-7 text-muted-foreground">
+                  {row.description}
+                </div>
               </div>
-              <div className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                {row.description}
+              <div className="max-w-full overflow-hidden border border-border/70 bg-background/35 px-3 py-2 font-mono text-sm leading-7 text-primary">
+                {row.value}
               </div>
             </div>
-            <div className="border border-border/80 bg-background/40 px-3 py-2 font-mono text-sm text-primary">
-              {row.value}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </SurfacePanel>
+      </Reveal>
 
-      <div className="border border-border/80 bg-card/75 p-4 text-sm leading-relaxed text-muted-foreground backdrop-blur-xl">
-        The active baseline currently references{" "}
-        <span className="text-foreground">{dashboard?.profile.trade_count ?? 0}</span> indexed
-        trades and reports Redis{" "}
-        <span className={readiness?.redis_connected ? "text-secondary" : "text-destructive"}>
-          {readiness?.redis_connected ? "connected" : "disconnected"}
-        </span>
-        , Postgres{" "}
-        <span className={readiness?.db_connected ? "text-secondary" : "text-destructive"}>
-          {readiness?.db_connected ? "connected" : "disconnected"}
-        </span>
-        , and model readiness{" "}
-        <span className={readiness?.model_loaded ? "text-secondary" : "text-destructive"}>
-          {readiness?.model_loaded ? "loaded" : "not loaded"}
-        </span>
-        .
-      </div>
+      <Reveal delay={0.15}>
+        <SurfacePanel accent="secondary" className="p-5 text-sm leading-8 text-muted-foreground">
+          The active baseline currently references{" "}
+          <span className="text-foreground">{dashboard?.profile.trade_count ?? 0}</span> indexed
+          trades and reports Redis{" "}
+          <span className={readiness?.redis_connected ? "text-secondary" : "text-destructive"}>
+            {readiness?.redis_connected ? "connected" : "disconnected"}
+          </span>
+          , Postgres{" "}
+          <span className={readiness?.db_connected ? "text-secondary" : "text-destructive"}>
+            {readiness?.db_connected ? "connected" : "disconnected"}
+          </span>
+          , and model readiness{" "}
+          <span className={readiness?.model_loaded ? "text-secondary" : "text-destructive"}>
+            {readiness?.model_loaded ? "loaded" : "not loaded"}
+          </span>
+          .
+        </SurfacePanel>
+      </Reveal>
     </div>
   );
 }

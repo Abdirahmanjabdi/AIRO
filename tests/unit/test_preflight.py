@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sentinel.api.main import app
+from sentinel.api.routes import health
 from sentinel.bridge import mt5_history
 from sentinel.bridge.mt5_relay import MT5BridgeRelay, TradeTelemetry
 from sentinel.infra.redis_cache import cache_manager
@@ -28,6 +29,7 @@ def test_cache_key_is_scoped_to_user_and_hash() -> None:
 
 def test_vault_storage_keeps_ciphertext_out_of_memory_store(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vault_client, "hvac", None)
+    monkeypatch.delenv("SENTINEL_REQUIRE_VAULT", raising=False)
     manager = vault_client.VaultManager()
     manager.store_broker_credentials(
         user_id="cipher-user",
@@ -42,6 +44,42 @@ def test_vault_storage_keeps_ciphertext_out_of_memory_store(monkeypatch: pytest.
 
     fetched = manager.fetch_broker_credentials("cipher-user")
     assert fetched["password"] == "super-secret"
+
+
+def test_vault_required_disables_fallback_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(vault_client, "hvac", None)
+    monkeypatch.setenv("SENTINEL_REQUIRE_VAULT", "true")
+    manager = vault_client.VaultManager()
+
+    with pytest.raises(RuntimeError, match="Vault is required"):
+        manager.store_broker_credentials(
+            user_id="required-user",
+            server="ICMarkets-Demo",
+            login_id=123456,
+            password_readonly="super-secret",
+        )
+
+
+@pytest.mark.asyncio
+async def test_readiness_reports_vault_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ReadyBrain:
+        is_trained = True
+
+    async def _true() -> bool:
+        return True
+
+    monkeypatch.setenv("SENTINEL_REQUIRE_VAULT", "true")
+    monkeypatch.setattr(health, "get_default_brain", lambda: _ReadyBrain())
+    monkeypatch.setattr(health.cache_manager, "ping", _true)
+    monkeypatch.setattr(health, "ping_db", _true)
+    monkeypatch.setattr(health.vault_manager, "is_healthy", lambda: False)
+    monkeypatch.setattr(health.vault_manager, "using_fallback", lambda: True)
+
+    response = await health.readiness()
+    assert response.status == "not_ready"
+    assert response.vault_required is True
+    assert response.vault_connected is False
+    assert response.details["vault"] == "required_but_unavailable"
 
 
 def test_mt5_history_bridge_handles_blank_history(monkeypatch: object) -> None:

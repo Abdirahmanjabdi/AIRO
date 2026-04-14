@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +27,20 @@ _default_brain: SentinelBrain | None = None
 _user_brain_cache: dict[str, tuple[str, SentinelBrain]] = {}
 
 
+def _existing_path(candidates: list[Path]) -> Path | None:
+    for candidate in candidates:
+        if str(candidate) and candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+async def _ensure_model_store_background() -> None:
+    try:
+        await asyncio.to_thread(model_store.ensure_bucket)
+    except Exception:
+        logger.exception("Model store initialization failed")
+
+
 def load_default_model() -> None:
     """
     Load or train the bundled default brain used for startup validation.
@@ -34,20 +49,34 @@ def load_default_model() -> None:
 
     global _default_brain
 
-    model_path = Path(
+    packaged_root = Path(__file__).resolve().parents[3]
+    configured_model_path = Path(
         os.getenv(
             "SENTINEL_MODEL_PATH",
-            str(Path(__file__).resolve().parents[3] / "default_model.joblib"),
+            str(packaged_root / "default_model.joblib"),
         )
     )
+    model_path = _existing_path(
+        [
+            configured_model_path,
+            Path("/app/default_model.joblib"),
+            packaged_root / "default_model.joblib",
+        ]
+    )
 
-    if model_path.exists():
+    if model_path is not None:
         logger.info("Loading default brain from %s", model_path)
         _default_brain = SentinelBrain.load(model_path)
         return
 
-    csv_path = Path(__file__).resolve().parents[3] / "Abdirahman Jama Abdi - REmodal.csv"
-    if not csv_path.exists():
+    csv_path = _existing_path(
+        [
+            Path(os.getenv("SENTINEL_BOOTSTRAP_CSV", "")),
+            Path("/app/Abdirahman Jama Abdi - REmodal.csv"),
+            packaged_root / "Abdirahman Jama Abdi - REmodal.csv",
+        ]
+    )
+    if csv_path is None:
         logger.warning("Bootstrap CSV missing at %s. Default brain will stay untrained.", csv_path)
         _default_brain = SentinelBrain()
         return
@@ -57,7 +86,17 @@ def load_default_model() -> None:
     frame = engineer_features(frame)
     _default_brain = SentinelBrain()
     _default_brain.train(frame)
-    _default_brain.save(model_path)
+    save_path = configured_model_path
+    try:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        _default_brain.save(save_path)
+    except Exception:
+        fallback_path = Path(tempfile.gettempdir()) / "sentinel-default-model.joblib"
+        try:
+            _default_brain.save(fallback_path)
+            logger.info("Saved default brain fallback to %s", fallback_path)
+        except Exception:
+            logger.warning("Default brain trained but could not be persisted to disk.", exc_info=True)
 
 
 async def initialize_runtime() -> None:
@@ -66,10 +105,7 @@ async def initialize_runtime() -> None:
     except Exception:
         logger.exception("Database initialization failed")
 
-    try:
-        await asyncio.to_thread(model_store.ensure_bucket)
-    except Exception:
-        logger.exception("Model store initialization failed")
+    asyncio.create_task(_ensure_model_store_background())
 
     load_default_model()
     try:

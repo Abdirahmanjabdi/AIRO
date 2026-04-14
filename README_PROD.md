@@ -6,6 +6,7 @@ Sentinel-Zero is an identity-first trading governance platform. Each trader is s
 
 This document is the operational runbook for the production-only controls that matter most:
 
+- Vault deployment and AppRole bootstrap
 - Vault master key rotation
 - manual model retraining for trading-style drift
 - canary launch expectations
@@ -20,6 +21,58 @@ The production inference path is keyed by `user_id`.
 - runtime inference resolves the same `user_id` back to that object key before scoring
 
 This is the core guarantee that prevents model cross-contamination between traders.
+
+## Vault Deployment and Bootstrap
+
+### Goal
+
+Deploy Vault inside the cluster, initialize it once, enable the engines Sentinel uses, and inject AppRole credentials into the brain and MT5 bridge through Kubernetes secrets.
+
+### Procedure
+
+1. Install the in-cluster Vault release:
+   - `helm upgrade --install sentinel-vault infra/helm/sentinel-vault --namespace sentinel-infra --create-namespace`
+   - or `kubectl apply -f infra/k8s/sentinel-vault.yaml`
+2. Wait for the stateful pod:
+   - `kubectl rollout status statefulset/sentinel-vault -n sentinel-infra`
+3. Initialize Vault exactly once and keep the output offline:
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault operator init -key-shares=5 -key-threshold=3 -format=json > vault-init.json`
+4. Unseal using any 3 of the returned unseal keys:
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault operator unseal <key-1>`
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault operator unseal <key-2>`
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault operator unseal <key-3>`
+5. Log in with the root token from `vault-init.json`:
+   - `kubectl exec -it -n sentinel-infra statefulset/sentinel-vault -- vault login <root-token>`
+6. Enable the secret engines Sentinel expects:
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault secrets enable -path=sentinel-kv kv-v2`
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault secrets enable -path=sentinel-transit transit`
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault write -f sentinel-transit/keys/sentinel-mt5`
+7. Enable AppRole auth:
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault auth enable approle`
+8. Create the Sentinel policy:
+   - `kubectl exec -i -n sentinel-infra statefulset/sentinel-vault -- vault policy write sentinel-brain - <<'EOF'`
+   - `path "sentinel-kv/data/users/*" { capabilities = ["create", "read", "update", "delete", "list"] }`
+   - `path "sentinel-kv/metadata/users/*" { capabilities = ["list", "read"] }`
+   - `path "sentinel-transit/encrypt/sentinel-mt5" { capabilities = ["update"] }`
+   - `path "sentinel-transit/decrypt/sentinel-mt5" { capabilities = ["update"] }`
+   - `path "sentinel-transit/keys/sentinel-mt5" { capabilities = ["read"] }`
+   - `EOF`
+9. Create the AppRole used by Sentinel workloads:
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault write auth/approle/role/sentinel-brain token_policies="sentinel-brain" token_ttl=1h token_max_ttl=4h secret_id_ttl=24h`
+10. Retrieve the AppRole credentials:
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault read -field=role_id auth/approle/role/sentinel-brain/role-id`
+   - `kubectl exec -n sentinel-infra statefulset/sentinel-vault -- vault write -field=secret_id -f auth/approle/role/sentinel-brain/secret-id`
+11. Create the runtime secret for the API deployment:
+   - `kubectl create secret generic sentinel-brain-runtime -n default --from-literal=DATABASE_URL='<postgres-url>' --from-literal=REDIS_URL='<redis-url>' --from-literal=S3_BUCKET='<model-bucket>' --from-literal=AWS_DEFAULT_REGION='eu-west-2' --from-literal=VAULT_ADDR='http://sentinel-vault.sentinel-infra.svc.cluster.local:8200' --from-literal=VAULT_ROLE_ID='<role-id>' --from-literal=VAULT_SECRET_ID='<secret-id>' --from-literal=SENTINEL_REQUIRE_VAULT='true'`
+12. Create the runtime secret for the MT5 bridge or per-user pod release:
+   - `kubectl create secret generic sentinel-pod-runtime -n sentinel-users --from-literal=VAULT_ADDR='http://sentinel-vault.sentinel-infra.svc.cluster.local:8200' --from-literal=VAULT_ROLE_ID='<role-id>' --from-literal=VAULT_SECRET_ID='<secret-id>' --from-literal=SENTINEL_REQUIRE_VAULT='true'`
+13. Restart the brain and bridge workloads after the secrets exist:
+   - `kubectl rollout restart deployment/sentinel-brain -n default`
+   - `kubectl rollout restart deployment/<bridge-or-user-pod-release> -n sentinel-users`
+14. Validate:
+   - `GET /readyz` returns `vault_connected=true`
+   - backend logs no longer show `fallback_memory_store`
+   - `POST /v1/credentials` succeeds and writes ciphertext to Vault
 
 ## Vault Master Key Rotation
 

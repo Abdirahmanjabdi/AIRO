@@ -34,6 +34,8 @@ class TestHealthEndpoints:
         data = resp.json()
         assert data["status"] in ("ready", "not_ready")
         assert "model_loaded" in data
+        assert "vault_connected" in data
+        assert "vault_required" in data
 
 
 class TestAnalyzeEndpoint:
