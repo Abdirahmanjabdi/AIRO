@@ -166,7 +166,20 @@ export class ApiError extends Error {
   }
 }
 
+export function getExecutionMode(): "local" | "cloud" {
+  return (localStorage.getItem("execution_mode") as "local" | "cloud") || "cloud";
+}
+
+export function setExecutionMode(mode: "local" | "cloud") {
+  localStorage.setItem("execution_mode", mode);
+  window.dispatchEvent(new Event("executionModeChanged"));
+}
+
 function resolveApiBaseUrl(): string {
+  if (getExecutionMode() === "cloud") {
+    return "https://api.sentinel-zero.cloud";
+  }
+
   const configured = import.meta.env.VITE_BRAIN_API_URL?.trim();
   if (configured) {
     return configured.replace(/\/+$/, "");
@@ -176,10 +189,8 @@ function resolveApiBaseUrl(): string {
   return `${protocol}//${hostname}:8000`;
 }
 
-const API_BASE_URL = resolveApiBaseUrl();
-
 export function getApiBaseUrl(): string {
-  return API_BASE_URL;
+  return resolveApiBaseUrl();
 }
 
 async function parseError(response: Response): Promise<never> {
@@ -236,7 +247,7 @@ async function apiRequest<T>(path: string, init?: ApiRequestOptions): Promise<T>
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...rest,
       headers: finalHeaders,
       signal: timeout.signal,
@@ -301,4 +312,34 @@ export const sentinelApi = {
   getAdminOverview(): Promise<AdminOverview> {
     return apiRequest("/v1/admin/overview");
   },
+
+  // Mock Provisioning Endpoint
+  provisionBridge(userId: string): Promise<{ status: string; pod_id: string }> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({ status: "provisioning", pod_id: `eks-win-${Math.random().toString(36).substring(7)}` });
+      }, 1500);
+    });
+  },
+
+  // Mock WebSocket Handshake
+  wsBridgeProvisioning(podId: string, onMessage: (msg: any) => void): () => void {
+    const sequence = [
+      { status: "pulling_image", message: "Spinning up AWS Windows Server Pod..." },
+      { status: "booting", message: "Starting MetaTrader 5 Terminal via bridge..." },
+      { status: "initialized", message: "mt5.initialize() successful. Handshake complete." }
+    ];
+    
+    let step = 0;
+    const interval = setInterval(() => {
+      if (step < sequence.length) {
+        onMessage(sequence[step]);
+        step++;
+      } else {
+        clearInterval(interval);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }
 };

@@ -79,3 +79,26 @@ infra/terraform/*.tfstate.backup
 infra/terraform/tfplan
 infra/terraform/plan_output.txt
 infra/terraform/apply_error.log
+infra/terraform/*.tfvars
+infra/terraform/override.tf
+infra/terraform/*_override.tf.json
+
+# AWS / Cloud credentials — CRITICAL: never commit
+*.pem
+*.key
+*.p12
+*.pfx
+.aws/
+prod.tfvars
+secrets.tfvars
+vault-token.txt
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.env.local
+frontend/.env.production
+frontend/dist/
+frontend/.vite/
+
+# Docker secrets
+docker-compose.override.yml

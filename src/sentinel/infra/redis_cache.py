@@ -91,7 +91,10 @@ class CacheManager:
         return json.loads(raw) if raw else None
 
     async def set_heartbeat(self, user_id: str) -> bool:
-        return bool(await self.r.set(f"presence:{user_id}", "active", ex=self.heartbeat_ttl))
+        ttl = await self.r.ttl(f"presence:{user_id}")
+        if ttl is None or ttl < self.heartbeat_ttl - 5:
+            return bool(await self.r.set(f"presence:{user_id}", "active", ex=self.heartbeat_ttl))
+        return True
 
     async def ping_state(self, user_id: str) -> bool:
         return bool(await self.r.exists(f"presence:{user_id}"))

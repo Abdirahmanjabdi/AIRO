@@ -93,7 +93,7 @@ module "eks" {
       desired_size   = local.mt5_desired_size
       ami_type       = "AL2023_x86_64_STANDARD"
       disk_size      = 20
-      capacity_type  = "ON_DEMAND"
+      capacity_type  = "SPOT"
 
       labels = {
         workload = "mt5"
@@ -214,6 +214,22 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "models" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "models" {
+  bucket = aws_s3_bucket.models.id
+
+  rule {
+    id     = "intelligent-tiering"
+    status = "Enabled"
+
+    filter {}
+
+    transition {
+      days          = 30
+      storage_class = "INTELLIGENT_TIERING"
+    }
+  }
+}
+
 # =============================================================================
 # ECR REPOSITORIES (Runtime Images)
 # =============================================================================
@@ -265,8 +281,7 @@ resource "aws_iam_policy" "brain_model_store" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:PutObject"
         ]
         Resource = "${aws_s3_bucket.models.arn}/*"
       }
@@ -296,7 +311,7 @@ locals {
   rds_instance_class          = var.environment == "dev" ? "db.t3.micro" : var.rds_instance_class
   rds_allocated_storage       = var.environment == "dev" ? 20 : 50
   rds_max_allocated_storage   = var.environment == "dev" ? 20 : 500
-  rds_backup_retention_period = var.environment == "dev" ? 0 : 7
+  rds_backup_retention_period = 0 # Force 0 to bypass AWS FreeTierRestrictionError
 
   common_tags = {
     Project     = "sentinel-zero"

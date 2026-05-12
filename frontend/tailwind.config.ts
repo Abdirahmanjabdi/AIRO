@@ -16,7 +16,7 @@ export default {
     extend: {
       fontFamily: {
         mono: ["Space Mono", "monospace"],
-        display: ["Syne", "sans-serif"],
+        display: ["Inter", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",

@@ -1,97 +1,172 @@
-# 🛡️ AI Risk Officer (AIRO): Autonomous Governance System
+# Sentinel Zero — AI-Driven Risk Management Layer
 
-![Equity Comparison](equity_comparison.png)
+> **Identity-first, model-driven trade protection for professional traders on FTMO, prop firms, and managed accounts.**
 
-> **"A Digital Nervous System for Algorithmic Trading."**
-> AIRO is an advanced Machine Learning framework that detects and mitigates behavioral failure modes (Tilt, Revenge Trading, Over-leveraging) in real-time.
-
----
-
-## 📊 Key Results
-| Metric | Human (Unmanaged) | AIRO (Managed) | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Total Return** | +49.01% | **+138.24%** | **+182%** |
-| **Alpha Generated** | - | **+89.23%** | - |
-| **Avg Exposure** | 1.0x | **0.36x** | **-64% Risk** |
-| **Validation** | - | **Robust** | (Tested on Unseen Data) |
+[![CI](https://github.com/Abdirahmanjabdi/AIRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Abdirahmanjabdi/AIRO/actions)
+[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
 
 ---
 
-## 🧬 System Architecture
-This project evolved through 5 generations of engineering:
+## 🧠 What Is Sentinel Zero?
 
-### V1: The Baseline (Behavioral Analytics)
--   **Concept:** Feature Engineering of human psychology.
--   **Innovation:** `Revenge_Timer` (Time since loss) and `Losing_Streak` (Cumulative Pain).
--   **Model:** Hybrid `IsolationForest` (Anomaly) + `RandomForest` (Classifier).
+Sentinel Zero is a real-time, per-user risk assessment engine that sits between a trader's MetaTrader 5 terminal and their live account. It uses a personalized **Isolation Forest + Random Forest** model trained on each trader's own behavioral baseline to detect anomalous trade patterns, equity drawdown violations, and revenge-trading cycles — and intervene in milliseconds to prevent catastrophic account blowup.
 
-### V2: Deep Context (Market Regime)
--   **Concept:** Context-Awareness.
--   **Innovation:** Added `Realized_Volatility` and `Trend_Momentum` features.
--   **Result:** The AI knows when to turn off during "Chop".
-
-### V3: The Optimizer (Bayesian Tuning)
--   **Concept:** Mathematical Optimality.
--   **Innovation:** Used `Optuna` to maximize the Sharpe Ratio.
--   **Result:** Found exact Risk Threshold `0.6537` and Tree Depth `10`.
-
-### V4: The Active Agent (Control Theory)
--   **Concept:** Continuous Control.
--   **Innovation:** Replaced Binary Blocking ("No") with Dynamic Sizing ("Less").
--   **Formula:** $Size = \max(0, 1 - (Risk \times Sensitivity))$
-
-### V5: The Ultimate Entity (Production)
--   **Concept:** Synthesis.
--   **Result:** The current system running `V2` Data + `V3` Params + `V4` Logic.
-
-### V6: Sentinel-Zero (Institutional Cloud)
--   **Concept:** Massive Concurrency & High Availability.
--   **Architecture:** Split into strict Microservices (`FastAPI` Brain + `Vite + React` User UI).
--   **Infrastructure:** Deployed via `Terraform` to AWS (EKS `1.30`) with strict `resources.limits` to block OOM Kills inside Wine+MT5 Pods.
--   **Result:** Capable of orchestrating 100k concurrent traders across LD4 nodes with sub-50ms inference.
+**Key capabilities:**
+- **Identity-first architecture** — every assessment is scoped to a specific user model; no shared risk parameters
+- **Real-time telemetry** — a lightweight MT5 bridge streams live position data to the Brain API every 2 seconds
+- **Explainable AI** — every BLOCK decision includes a SHAP-powered reason visible on the Command Centre dashboard
+- **Vault-secured credentials** — broker login details are never stored in plaintext; all access is via HashiCorp Vault
 
 ---
 
-## 🧠 Understand the "Why" (XAI)
-We use SHAP (SHapley Additive exPlanations) to ensure the Black Box is transparent.
-![Feature Importance](feature_importance.png)
-*Figure: The primary driver of loss was 'Losing Streak' followed by 'Drawdown State'. The AI learned that "Tilt" is the enemy.*
+## 🏗️ High-Level Architecture
 
----
-
-## 🚀 Quickstart
-
-### 1. The Cloud Stack (Docker)
-The V6 institutional engine runs via Docker Compose, orchestrating the FastAPI Brain, PostgreSQL, Redis, HashiCorp Vault, and MinIO:
-```bash
-docker compose up --build -d
 ```
-*API Docs available at: `http://localhost:8000/docs`*
+┌─────────────────────────────────────────────────────────────────┐
+│                        TRADER'S MACHINE                         │
+│                                                                 │
+│   MetaTrader 5  ──────►  MT5 Bridge (mt5_relay.py)             │
+│   (Live Account)          Python / MT5 API                      │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ HTTPS POST /v1/analyze
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     SENTINEL BRAIN (EKS)                        │
+│                                                                 │
+│  ┌────────────┐   ┌─────────────┐   ┌──────────────────────┐  │
+│  │  FastAPI   │──►│ Risk Engine  │──►│  PostgreSQL (Audits) │  │
+│  │  Brain API │   │  (IsoForest  │   │  Redis (Cache/State) │  │
+│  └────────────┘   │  + RandForest│   │  S3 (Model Store)   │  │
+│                   │  + SHAP)     │   └──────────────────────┘  │
+│                   └─────────────┘                               │
+│                         │                                       │
+│                   ┌─────▼──────┐                               │
+│                   │   Vault    │  ← Broker Credentials          │
+│                   └────────────┘                               │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ WebSocket / REST
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   COMMAND CENTRE (React SPA)                    │
+│                                                                 │
+│   Risk Gauge · Audit Table · Baseline Status · SHAP Hover      │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### 2. The Sentinel Dashboard (Connect & Forget UI)
-To launch the premium user frontend:
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+| Tool | Version |
+|------|---------|
+| Python | 3.12+ |
+| Node.js | 20+ |
+| Docker Desktop | Latest |
+| MetaTrader 5 | Any (Windows) |
+
+### 1. Clone & Configure
+
+```bash
+git clone https://github.com/Abdirahmanjabdi/AIRO.git
+cd AIRO
+cp .env.example .env   # Fill in your values — never commit .env!
+```
+
+### 2. Start the Backend (Brain + Data Stores)
+
+```bash
+docker-compose up -d
+```
+
+This spins up: **FastAPI Brain**, **PostgreSQL**, **Redis**, **Vault**, and **MinIO** (local S3).
+
+### 3. Verify Everything is Healthy
+
+```bash
+curl http://localhost:8000/healthz
+# Expected: {"status":"ok","version":"1.0.0",...}
+```
+
+### 4. Start the Frontend
+
 ```bash
 cd frontend
+npm install
 npm run dev
+# Open: http://localhost:8081
 ```
-*Access the Elite UI at: `http://localhost:8080`*
 
-### 3. Legacy Local Sandbox (Testing)
-If you want to view the V1-V5 genesis algorithms visually before committing to the heavy Docker stack:
+### 5. Launch the MT5 Bridge (Windows Terminal)
+
+```powershell
+# Replace values with your FTMO credentials
+$env:PYTHONPATH="src"
+$env:VAULT_ADDR="http://localhost:8200"
+$env:VAULT_TOKEN="your-vault-token"
+$env:SENTINEL_USER_ID="Your-User-ID"
+python -m sentinel.bridge.mt5_relay
+```
+
+### 6. Onboard Your Account
+
+Navigate to `http://localhost:8081/workspace/onboarding` and follow the 4-step onboarding wizard to securely store your MT5 credentials in Vault and train your personal baseline model.
+
+---
+
+## 📁 Repository Structure
+
+```
+sentinel-zero/
+├── src/sentinel/
+│   ├── api/            # FastAPI routes (analyze, dashboard, onboarding)
+│   ├── brain/          # ML engine (IsolationForest, RandomForest, SHAP)
+│   ├── bridge/         # MT5 relay (live position polling)
+│   ├── db/             # SQLAlchemy models & Alembic migrations
+│   └── domain/         # Pydantic models (shared types)
+├── frontend/           # React + TypeScript Command Centre
+├── infra/
+│   ├── docker/         # Dockerfiles for brain & bridge
+│   ├── helm/           # Helm charts for EKS deployment
+│   ├── k8s/            # Kubernetes manifests
+│   └── terraform/      # EKS, RDS, Redis, S3, ECR, IAM
+├── tests/              # Unit & integration tests
+└── .github/workflows/  # CI/CD (Lint → Test → Build → Deploy)
+```
+
+---
+
+## ☁️ Production Deployment (AWS EKS)
+
 ```bash
-pip install -r requirements.txt
-python -m streamlit run app.py
+cd infra/terraform
+
+# 1. Initialise providers
+terraform init
+
+# 2. Review plan (use a prod.tfvars you've filled in locally — never commit it)
+terraform plan -var-file="prod.tfvars"
+
+# 3. Apply
+terraform apply -var-file="prod.tfvars"
 ```
 
----
-
-## 📂 Documentation
-
--   [Masterclass: The Engineering Principle](AIRO_MASTERCLASS.md)
--   [Validation Report: Proof of Robustness](validation_report.md)
--   [Learning Guide Level 1: Data Engineering](learning_guide_level_1.md)
+After the cluster is up, the GitHub Actions `deploy-eks` job will handle all future zero-downtime deployments automatically on every push to `main`.
 
 ---
 
-**Author:** [Abdirahman Jama]
-**License:** MIT
+## 🔐 Security
+
+- **Secrets:** All broker credentials are encrypted in HashiCorp Vault. `.env` files and `*.tfvars` are in `.gitignore` and are never committed.
+- **IAM:** Node group roles follow least-privilege — read/write to the model S3 bucket only; no `DeleteObject` permission.
+- **Docker:** All containers run as non-root (`sentinel` user).
+- **ECR:** Images are scanned for vulnerabilities on every push (`scan_on_push = true`).
+
+---
+
+## 📄 License
+
+Proprietary — All rights reserved. © 2026 Sentinel Zero / AIRO.

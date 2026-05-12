@@ -3,10 +3,14 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.brain
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
     ports:
       - "8000:8000"
     environment:
-      CORS_ORIGINS: "http://localhost:3000,http://localhost:8080"
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:8081"
       REDIS_URL: "redis://redis:6379/0"
       DATABASE_URL: "postgresql+asyncpg://sentinel:sentinel@postgres:5432/sentinel"
       SENTINEL_MODEL_PATH: "/app/default_model.joblib"
@@ -38,6 +42,11 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.mt5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2G"
     environment:
       BRAIN_API_URL: "http://brain:8000"
       REDIS_URL: "redis://redis:6379/0"

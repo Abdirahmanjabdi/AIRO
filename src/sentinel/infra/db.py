@@ -429,6 +429,32 @@ async def record_risk_audit(
         _memory_audits.append(audit)
     return audit
 
+async def update_risk_audit_explanation(
+    session: AsyncSession,
+    audit_id: int,
+    explanation: list[dict[str, float | str]],
+    top_reason: str | None,
+) -> RiskAudit | None:
+    if not DB_AVAILABLE:
+        for audit in _memory_audits:
+            if getattr(audit, "id", None) == audit_id:
+                audit.explanation = explanation
+                audit.top_reason = top_reason
+                return audit
+        return None
+
+    try:
+        result = await session.execute(select(RiskAudit).where(RiskAudit.id == audit_id))
+        audit = result.scalar_one_or_none()
+        if audit is not None:
+            audit.explanation = explanation
+            audit.top_reason = top_reason
+            await session.commit()
+            await session.refresh(audit)
+        return audit
+    except Exception:
+        return None
+
 
 async def list_risk_audits(
     session: AsyncSession,

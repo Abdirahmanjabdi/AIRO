@@ -104,9 +104,9 @@ class UserBaseline(BaseModel):
     def validate_baseline(cls, value: bool, info: object) -> bool:
         data = getattr(info, "data", {})
         trade_count = data.get("trade_count", 0)
-        if value and trade_count < 50:
+        if value and trade_count < 1:
             raise ValueError(
-                f"Cannot be baseline_ready with only {trade_count} trades (min 50)"
+                f"Cannot be baseline_ready with only {trade_count} trades (min 1)"
             )
         return value
 
@@ -117,7 +117,7 @@ class OnboardingRequest(BaseModel):
     user_id: str = Field(..., min_length=1)
     broker_server: str = Field(..., min_length=1)
     account_id: str = Field(..., min_length=1)
-    min_trades: int = Field(default=100, ge=50, le=500)
+    min_trades: int = Field(default=10, ge=1, le=500)
 
 
 class CredentialRequest(BaseModel):

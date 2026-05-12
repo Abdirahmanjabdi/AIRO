@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import BrandMark from "@/components/BrandMark";
+import LiveLatencyPulse from "@/components/LiveLatencyPulse";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { sentinelApi } from "@/lib/api";
@@ -165,7 +166,7 @@ export default function Landing() {
               </div>
 
               <div className="mt-10 grid gap-4 sm:grid-cols-3">
-                <CountUpBadge label="Decision budget" value={500} suffix=" ms" />
+                <LiveLatencyPulse />
                 <CountUpBadge label="Per-user artifact" value={1} suffix=" model" />
                 <CountUpBadge label="Blank-baseline safe" value={100} suffix="%" />
               </div>

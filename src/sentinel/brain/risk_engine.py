@@ -146,7 +146,7 @@ class SentinelBrain:
     # PREDICTION (with circuit breaker)
     # =========================================================================
 
-    def assess_risk(self, context: TradeContext) -> RiskAssessment:
+    def assess_risk(self, context: TradeContext, skip_explanation: bool = True) -> RiskAssessment:
         """
         Evaluate a trade and return a full RiskAssessment.
 
@@ -180,7 +180,7 @@ class SentinelBrain:
             )
 
         try:
-            result = self._predict(context, start_time)
+            result = self._predict(context, start_time, skip_explanation)
             self._reset_circuit_breaker()
             return result
         except Exception as exc:
@@ -195,10 +195,11 @@ class SentinelBrain:
         self,
         context: TradeContext,
         start_time: float,
+        skip_explanation: bool = True,
     ) -> RiskAssessment:
         """Core prediction logic — no error handling (caller wraps)."""
-        # Convert Pydantic model to feature vector
-        X_input = self._context_to_dataframe(context)
+        # Convert Pydantic model to feature vector using NumPy for O(1) inference speed
+        X_input = self._context_to_numpy(context)
 
         # 1. Anomaly Detection (Watchdog)
         anomaly_score: int = int(self.iso_forest.predict(X_input)[0])
@@ -226,7 +227,7 @@ class SentinelBrain:
             decision = Decision.ALLOW if size_multiplier >= 0.95 else Decision.REDUCE_SIZE
 
         # 4. SHAP Explanation
-        explanation = self._explain(X_input)
+        explanation = [] if skip_explanation else self._explain(X_input)
 
         return RiskAssessment(
             decision=decision,
@@ -244,7 +245,7 @@ class SentinelBrain:
 
     def _explain(
         self,
-        X_input: pd.DataFrame,
+        X_input: np.ndarray | pd.DataFrame,
         top_n: int = 3,
     ) -> list[FeatureContribution]:
         """Get top-N SHAP feature contributions for the prediction."""
@@ -359,20 +360,23 @@ class SentinelBrain:
     # HELPERS
     # =========================================================================
 
+    def _context_to_numpy(self, context: TradeContext) -> np.ndarray:
+        """Convert a TradeContext Pydantic model to a 1-row NumPy array for fast inference."""
+        return np.array([[
+            context.hour_decimal,
+            float(context.losing_streak),
+            context.drawdown_state,
+            context.lot_deviation,
+            context.revenge_timer,
+            context.lots,
+            context.rr_ratio,
+            context.realized_vol_20,
+            context.trend_momentum,
+        ]])
+        
     def _context_to_dataframe(self, context: TradeContext) -> pd.DataFrame:
-        """Convert a TradeContext Pydantic model to a 1-row DataFrame."""
-        row: dict[str, float] = {
-            "Hour_Decimal": context.hour_decimal,
-            "Losing_Streak": float(context.losing_streak),
-            "Drawdown_State": context.drawdown_state,
-            "Lot_Deviation": context.lot_deviation,
-            "Revenge_Timer": context.revenge_timer,
-            "Lots": context.lots,
-            "RR Ratio": context.rr_ratio,
-            "Realized_Vol_20": context.realized_vol_20,
-            "Trend_Momentum": context.trend_momentum,
-        }
-        return pd.DataFrame([row])[self._feature_columns]
+        """Legacy helper for when feature names are required."""
+        return pd.DataFrame(self._context_to_numpy(context), columns=self._feature_columns)
 
     @property
     def is_trained(self) -> bool:

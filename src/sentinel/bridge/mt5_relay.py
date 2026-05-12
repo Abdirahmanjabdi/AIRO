@@ -64,12 +64,17 @@ class MT5BridgeRelay:
         self._running = True
         self._client: httpx.AsyncClient | None = None
         self._history_bridge = MT5HistoryBridge(self.brain_url)
+        self._mt5_ready = False  # True once MT5 is initialized for live monitoring
+        self._monitor_user_id: str = os.getenv("SENTINEL_USER_ID", "")
 
     async def start(self) -> None:
         logger.info("Bridge relay starting. Brain API: %s", self.brain_url)
 
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, self._shutdown_handler)
+
+        # Try to initialize MT5 for live monitoring on startup
+        await asyncio.to_thread(self._ensure_mt5_connected)
 
         async with httpx.AsyncClient(
             base_url=self.brain_url,
@@ -87,6 +92,44 @@ class MT5BridgeRelay:
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         logger.info("Bridge relay stopped.")
+
+    def _ensure_mt5_connected(self) -> None:
+        """Initialize MT5 using vault credentials for live position monitoring."""
+        if self._mt5_ready:
+            return
+        if not self._monitor_user_id:
+            return
+
+        try:
+            from sentinel.bridge.mt5_history import mt5 as mt5_module
+            if mt5_module is None:
+                return
+
+            # Check if already initialized
+            info = mt5_module.terminal_info()
+            if info is not None:
+                self._mt5_ready = True
+                logger.info("MT5 already initialized for live monitoring.")
+                return
+
+            from sentinel.infra.vault_client import vault_manager
+            creds = vault_manager.fetch_broker_credentials(self._monitor_user_id)
+            login = int(creds["login"])
+            server = str(creds["server"])
+            password = str(creds["password"])
+
+            initialized = mt5_module.initialize(login=login, server=server, password=password)
+            if initialized:
+                self._mt5_ready = True
+                logger.info(
+                    "MT5 initialized for live monitoring: user=%s server=%s",
+                    self._monitor_user_id,
+                    server,
+                )
+            else:
+                logger.warning("MT5 initialize failed for live monitoring: %s", mt5_module.last_error())
+        except Exception as exc:
+            logger.warning("Could not initialize MT5 for live monitoring: %s", exc)
 
     async def _verify_brain_connection(self) -> None:
         assert self._client is not None
@@ -170,21 +213,96 @@ class MT5BridgeRelay:
 
     def _poll_mt5_for_signal(self) -> TradeTelemetry | None:
         """
-        Reads live trade telemetry from a sidecar-produced JSON signal file.
-        This keeps the bridge as a transport layer while allowing broker-side
-        tooling to hand off pre-computed telemetry to the Brain API.
+        Live position monitor for manual traders.
+        Reads open MT5 positions directly every poll cycle and derives
+        behavioural telemetry (drawdown, losing streak, revenge timer, lot deviation).
         """
+        # Re-attempt MT5 init if not ready
+        if not self._mt5_ready:
+            self._ensure_mt5_connected()
 
-        if SIGNAL_FILE is None:
+        try:
+            from sentinel.bridge.mt5_history import mt5 as mt5_module
+        except Exception:
+            mt5_module = None
+
+        if mt5_module is None or not self._mt5_ready:
+            # Fallback: signal file
+            if SIGNAL_FILE is None:
+                return None
+            signal_path = Path(SIGNAL_FILE)
+            if not signal_path.exists():
+                return None
+            payload = json.loads(signal_path.read_text(encoding="utf-8"))
+            signal_path.unlink(missing_ok=True)
+            return TradeTelemetry.model_validate(payload)
+
+        try:
+            positions = mt5_module.positions_get()
+        except Exception as exc:
+            logger.debug("MT5 positions_get failed: %s", exc)
+            self._mt5_ready = False  # Force re-init next cycle
             return None
 
-        signal_path = Path(SIGNAL_FILE)
-        if not signal_path.exists():
+        if not positions:
             return None
 
-        payload = json.loads(signal_path.read_text(encoding="utf-8"))
-        signal_path.unlink(missing_ok=True)
-        return TradeTelemetry.model_validate(payload)
+        pos = positions[0]
+        symbol = str(getattr(pos, "symbol", "UNKNOWN"))
+        lots = float(getattr(pos, "volume", 0.01))
+        open_time_ts = int(getattr(pos, "time", 0))
+
+        account = None
+        try:
+            account = mt5_module.account_info()
+        except Exception:
+            pass
+
+        balance = float(getattr(account, "balance", 10000.0)) if account else 10000.0
+        equity = float(getattr(account, "equity", balance)) if account else balance
+        drawdown_state = max(0.0, round((balance - equity) / max(balance, 1.0), 4))
+
+        import time as _time
+        now_ts = int(_time.time())
+        revenge_timer = float(max(0, now_ts - open_time_ts)) if open_time_ts > 0 else 0.0
+
+        from datetime import datetime, timezone
+        hour_decimal = datetime.now(timezone.utc).hour + datetime.now(timezone.utc).minute / 60.0
+        lot_deviation = max(0.0, round(lots / 0.01 - 1.0, 2))
+
+        losing_streak = 0
+        try:
+            from datetime import timedelta
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(days=30)
+            deals = mt5_module.history_deals_get(start, end)
+            if deals:
+                for deal in reversed(list(deals)):
+                    p = float(getattr(deal, "profit", 0.0))
+                    if p < 0:
+                        losing_streak += 1
+                    elif p > 0:
+                        break
+        except Exception:
+            pass
+
+        user_id = self._monitor_user_id or os.getenv("SENTINEL_USER_ID", "Chllanger-01")
+
+        logger.info("Live position: %s %.2f lots | drawdown=%.2f%% | streak=%d", symbol, lots, drawdown_state * 100, losing_streak)
+
+        return TradeTelemetry(
+            user_id=user_id,
+            symbol=symbol,
+            hour_decimal=hour_decimal,
+            losing_streak=losing_streak,
+            drawdown_state=drawdown_state,
+            lot_deviation=lot_deviation,
+            revenge_timer=min(revenge_timer, 3600.0),
+            lots=lots,
+            rr_ratio=1.0,
+            realized_vol_20=0.0,
+            trend_momentum=0.0,
+        )
 
     def _execute_decision(
         self,
@@ -212,7 +330,7 @@ class MT5BridgeRelay:
             return
 
         logger.warning(
-            "BLOCK %s for user %s (risk %.2f%%, anomaly=%s)",
+            "⚠️  BLOCK %s for user %s (risk %.2f%%, anomaly=%s) — Equity Guard triggered!",
             telemetry.symbol,
             telemetry.user_id,
             decision.risk_score * 100,

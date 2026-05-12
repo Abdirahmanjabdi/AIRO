@@ -12,12 +12,13 @@ import {
 } from "lucide-react";
 
 import MetricCard from "@/components/MetricCard";
+import PipelineVisual from "@/components/PipelineVisual";
 import Reveal from "@/components/Reveal";
 import SectionHeader from "@/components/SectionHeader";
 import SurfacePanel from "@/components/SurfacePanel";
 import { toast } from "@/components/ui/sonner";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
-import { sentinelApi, type OnboardingState } from "@/lib/api";
+import { sentinelApi, type OnboardingState, getExecutionMode } from "@/lib/api";
 
 type Stage = "IDLE" | "VAULT" | "PROVISIONING" | "SYNC" | "AUDIT" | "LIVE";
 
@@ -127,7 +128,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
   const [brokerServer, setBrokerServer] = useState(identity?.brokerServer ?? "");
   const [accountId, setAccountId] = useState(identity?.accountId ?? "");
   const [readOnlyPassword, setReadOnlyPassword] = useState("");
-  const [minTrades, setMinTrades] = useState(100);
+  const [minTrades, setMinTrades] = useState(10);
   const [stage, setStage] = useState<Stage>("IDLE");
   const [jobId, setJobId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -189,6 +190,31 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
       appendLog(`> Vault path confirmed: ${credentialResponse.vault_path}`);
 
       setStage("PROVISIONING");
+      
+      const mode = getExecutionMode();
+      if (mode === "cloud") {
+        setStatusMessage("Provisioning Sentinel Bridge AWS Pod...");
+        appendLog("> Requesting AWS EKS Windows Node for bridge isolation...");
+        
+        const provisionResponse = await sentinelApi.provisionBridge(userId);
+        appendLog(`> Provisioning bridge pod: ${provisionResponse.pod_id}`);
+        
+        // Wait for WebSocket handshake
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = sentinelApi.wsBridgeProvisioning(provisionResponse.pod_id, (msg) => {
+            appendLog(`> [WS] ${msg.message}`);
+            if (msg.status === "initialized") {
+              resolve();
+            }
+          });
+          // Timeout after 30 seconds for safety
+          setTimeout(() => {
+            cleanup();
+            reject(new Error("WebSocket timeout waiting for Windows Bridge initialization."));
+          }, 30000);
+        });
+      }
+
       setStatusMessage("Dispatching onboarding to the MT5 bridge.");
       appendLog("> Queueing personalized onboarding job.");
 
@@ -353,43 +379,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
       </Reveal>
 
       <Reveal delay={0.1}>
-        <div className="grid gap-4 xl:grid-cols-4">
-          {STEPS.map((stepItem, index) => {
-            const isComplete = stage === "LIVE" || (currentStepIndex >= 0 && index < currentStepIndex);
-            const isActive = stepItem.key === stage;
-            const Icon = isComplete ? CheckCircle2 : stepItem.icon;
-
-            return (
-              <SurfacePanel
-                key={stepItem.key}
-                accent={isActive ? "primary" : isComplete ? "secondary" : "neutral"}
-                className="p-5"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                    0{index + 1}
-                  </div>
-                  <Icon
-                    size={18}
-                    className={
-                      isComplete
-                        ? "text-secondary"
-                        : isActive
-                          ? "text-primary"
-                          : "text-muted-foreground"
-                    }
-                  />
-                </div>
-                <div className="mt-6 font-display text-xl font-bold text-foreground">
-                  {stepItem.label}
-                </div>
-                <div className="mt-3 text-sm leading-7 text-muted-foreground">
-                  {stepItem.description}
-                </div>
-              </SurfacePanel>
-            );
-          })}
-        </div>
+        <PipelineVisual steps={STEPS} currentStage={stage} />
       </Reveal>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_400px]">
@@ -583,6 +573,10 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
                       onChange={(event) => setMinTrades(Number(event.target.value))}
                       className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
                     >
+                      <option value="1">Any trades (new account)</option>
+                      <option value="5">5 trades</option>
+                      <option value="10">10 trades</option>
+                      <option value="25">25 trades</option>
                       <option value="50">50 trades</option>
                       <option value="100">100 trades</option>
                       <option value="250">250 trades</option>

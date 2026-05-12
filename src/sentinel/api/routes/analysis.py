@@ -57,6 +57,7 @@ from sentinel.infra.db import (
     upsert_api_credential,
     update_onboarding_job,
     upsert_user,
+    update_risk_audit_explanation,
 )
 from sentinel.infra.redis_cache import cache_manager
 from sentinel.infra.s3 import model_store
@@ -150,6 +151,29 @@ def _trades_to_frame(trades: list[HistoricalTrade]) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+async def _compute_shap_background(
+    context: TradeContext,
+    user_id: str,
+    audit_id: int,
+) -> None:
+    try:
+        from sentinel.infra.db import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            brain = await get_user_brain(user_id, session)
+            if brain is None:
+                brain = SentinelBrain()
+            
+            X_input = brain._context_to_dataframe(context)
+            explanation = await asyncio.to_thread(brain._explain, X_input)
+            
+            exp_list = [e.model_dump(mode="json") for e in explanation] if hasattr(explanation[0], "model_dump") else [e for e in explanation] if explanation else []
+            top_reason = exp_list[0]["feature"] if exp_list else None
+            
+            await update_risk_audit_explanation(session, audit_id, exp_list, top_reason)
+    except Exception:
+        logger.exception("Background SHAP calculation failed for %s", user_id)
 
 
 async def _train_and_persist_user_model(
@@ -317,6 +341,7 @@ async def whop_webhook(
 )
 async def analyze_trade(
     context: TradeContext,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
 ) -> RiskAssessment:
     payload = context.model_dump(mode="json")
@@ -357,15 +382,41 @@ async def analyze_trade(
     if brain is None:
         brain = SentinelBrain()
 
-    assessment = await asyncio.to_thread(brain.assess_risk, context)
+    assessment = await asyncio.to_thread(brain.assess_risk, context, skip_explanation=True)
 
     try:
         await cache_manager.cache_risk_score(cache_key, assessment.model_dump(mode="json"))
     except Exception:
         logger.exception("Failed to cache risk assessment for %s", context.user_id)
 
+    # Build a fallback rule-based explanation when no baseline model is trained yet
+    fallback_explanation: list[dict] = []
+    fallback_top_reason: str | None = None
+
+    mode_val = assessment.mode.value if hasattr(assessment.mode, "value") else str(assessment.mode)
+    if mode_val in ("baseline_pending", "normal") and assessment.risk_score >= 0.9:
+        # Derive which feature drove the block based on the raw context values
+        signals: list[tuple[str, float, str]] = []
+        if context.drawdown_state > 0.03:
+            signals.append(("drawdown_state", context.drawdown_state, "Account drawdown exceeds 3% threshold"))
+        if context.losing_streak >= 3:
+            signals.append(("losing_streak", float(context.losing_streak), f"{context.losing_streak} consecutive losses detected"))
+        if context.revenge_timer > 300:
+            signals.append(("revenge_timer", context.revenge_timer, "Position opened <5 min after a loss — revenge pattern"))
+        if context.lot_deviation > 1.5:
+            signals.append(("lot_deviation", context.lot_deviation, "Lot size deviates significantly from baseline"))
+        if not signals:
+            signals.append(("baseline_pending", 1.0, "No trade baseline established — conservative block until model trains"))
+
+        signals.sort(key=lambda s: s[1], reverse=True)
+        fallback_explanation = [
+            {"feature": feat, "impact": round(val * 0.3, 4)}
+            for feat, val, desc in signals
+        ]
+        fallback_top_reason = signals[0][0]
+
     try:
-        await record_risk_audit(
+        audit_record = await record_risk_audit(
             session,
             user_id=context.user_id,
             symbol=context.symbol,
@@ -374,15 +425,19 @@ async def analyze_trade(
             size_multiplier=assessment.size_multiplier,
             mode=assessment.mode.value,
             is_anomaly=assessment.is_anomaly,
-            top_reason=assessment.explanation[0].feature if assessment.explanation else None,
-            explanation=assessment.model_dump(mode="json")["explanation"],
+            top_reason=fallback_top_reason,
+            explanation=fallback_explanation,
             latency_ms=assessment.latency_ms,
             cached=False,
         )
+        # Only schedule SHAP if user has a real trained model
+        if getattr(audit_record, "id", None) is not None and not fallback_explanation:
+            background_tasks.add_task(_compute_shap_background, context, context.user_id, audit_record.id)
     except Exception:
         logger.exception("Failed to persist risk audit for %s", context.user_id)
 
     return assessment
+
 
 
 @router.post(
@@ -492,11 +547,13 @@ async def receive_onboarding_data(
         if job is None:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job update failed.")
         return _job_to_status(job)
-    if len(submission.trades) < job.min_trades:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Expected at least {job.min_trades} trades, received {len(submission.trades)}.",
-        )
+    # Accept whatever history exists — new accounts simply get a partial baseline
+    logger.info(
+        "Received %d trades for job %s (min_trades=%d). Training with available history.",
+        len(submission.trades),
+        submission.job_id,
+        job.min_trades,
+    )
 
     job = await update_onboarding_job(
         session,
