@@ -50,6 +50,15 @@ module "vpc" {
 # EKS CLUSTER
 # =============================================================================
 
+# TODO(10k-scale): migrate the MT5 data plane from fixed managed node groups to
+# EKS Auto Mode or Karpenter once Vanguard telemetry proves pod density, MT5 RAM
+# footprint, and broker-session recovery timings. The current Spot + On-Demand
+# failover split is suitable for controlled beta capacity, not automatic 10k
+# user burst scaling.
+# TODO(10k-scale): add AWS Load Balancer Controller/Ingress for the Brain API
+# and replace single-node Redis with ElastiCache replication group cluster mode
+# before public multi-region launch.
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
@@ -97,6 +106,28 @@ module "eks" {
 
       labels = {
         workload = "mt5"
+      }
+
+      taints = [{
+        key    = "workload"
+        value  = "mt5"
+        effect = "NO_SCHEDULE"
+      }]
+    }
+
+    # MT5 failover nodes (kept near-zero; Cluster Autoscaler can expand if Spot is reclaimed)
+    mt5_failover = {
+      instance_types = local.mt5_failover_instance_types
+      min_size       = 0
+      max_size       = local.mt5_failover_max_size
+      desired_size   = 0
+      ami_type       = "AL2023_x86_64_STANDARD"
+      disk_size      = 20
+      capacity_type  = "ON_DEMAND"
+
+      labels = {
+        workload = "mt5"
+        capacity = "failover"
       }
 
       taints = [{
@@ -301,10 +332,12 @@ locals {
   brain_max_size       = var.environment == "dev" ? 3 : 10
   brain_desired_size   = var.environment == "dev" ? 2 : 2
 
-  mt5_instance_types = var.environment == "dev" ? ["t3.micro"] : ["r6i.xlarge"]
+  mt5_instance_types          = var.environment == "dev" ? ["t3.micro"] : ["r6i.xlarge", "r6a.xlarge", "m6i.xlarge"]
+  mt5_failover_instance_types = var.environment == "dev" ? ["t3.micro"] : ["r6i.xlarge", "m6i.xlarge"]
   mt5_min_size       = var.environment == "dev" ? 1 : 1
-  mt5_max_size       = var.environment == "dev" ? 2 : 50
+  mt5_max_size       = var.environment == "dev" ? 2 : 250
   mt5_desired_size   = var.environment == "dev" ? 1 : 2
+  mt5_failover_max_size = var.environment == "dev" ? 1 : 40
 
   rds_engine_version          = var.environment == "dev" ? "11.22-rds.20250220" : "16.2"
   rds_family                  = var.environment == "dev" ? "postgres11" : "postgres16"

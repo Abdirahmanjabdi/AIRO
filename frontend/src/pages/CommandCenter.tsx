@@ -11,7 +11,7 @@ import SHAPHoverCard from "@/components/SHAPHoverCard";
 import SectionHeader from "@/components/SectionHeader";
 import SurfacePanel from "@/components/SurfacePanel";
 import { frontendEnv } from "@/lib/env";
-import type { ReadinessResponse, WorkspaceSummary } from "@/lib/api";
+import type { ReadinessResponse, RiskAuditRecord, WorkspaceSummary } from "@/lib/api";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
 import {
   decisionBadgeTone,
@@ -31,7 +31,7 @@ interface CommandCenterProps {
   onRefresh: () => void;
 }
 
-function generateInsightText(audit: any, identity: string): string {
+function generateInsightText(audit: RiskAuditRecord | null, identity: string): string {
   if (!audit) return "Awaiting live telemetry to generate behavioral insights.";
   if (audit.decision === "BLOCK") {
     return `Critical intervention: ${identity} exhibited '${audit.top_reason || 'Anomaly'}' signature on ${audit.symbol}. Immediate execution block applied.`;
@@ -346,14 +346,14 @@ export default function CommandCenter({
                         </span>
                       </td>
                       <td className={`px-5 py-3 ${riskTextTone(audit.risk_score)}`}>
-                        <SHAPHoverCard explanation={audit.explanation as any[]}>
+                        <SHAPHoverCard explanation={audit.explanation}>
                           {audit.risk_score.toFixed(4)}
                         </SHAPHoverCard>
                       </td>
                       <td className="px-5 py-3 text-foreground">{audit.size_multiplier.toFixed(2)}x</td>
                       <td className="px-5 py-3 text-muted-foreground">{formatMode(audit.mode)}</td>
                       <td className="px-5 py-3 text-muted-foreground">
-                        <SHAPHoverCard explanation={audit.explanation as any[]}>
+                        <SHAPHoverCard explanation={audit.explanation}>
                           {audit.top_reason ?? (audit.explanation[0]?.feature || "No explanation")}
                         </SHAPHoverCard>
                       </td>

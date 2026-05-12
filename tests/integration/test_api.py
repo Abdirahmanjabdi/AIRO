@@ -124,7 +124,7 @@ class TestOnboardingEndpoint:
             "user_id": "test-user-003",
             "broker_server": "ICMarkets-Demo",
             "account_id": "12345680",
-            "min_trades": 10,  # Below minimum
+            "min_trades": 0,
         }
         resp = client.post("/v1/onboard", json=payload)
         assert resp.status_code == 422

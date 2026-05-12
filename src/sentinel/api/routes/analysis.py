@@ -39,6 +39,8 @@ from sentinel.domain.models import (
     RiskAssessment,
     TradeContext,
     UserBaseline,
+    UserInitialParameters,
+    UserMaturity,
     WorkspaceSummary,
     WhopWebhookRequest,
     WhopWebhookResponse,
@@ -104,6 +106,7 @@ def _job_to_status(job: object) -> OnboardingStatus:
 
 
 def _user_to_profile(user: object) -> UserBaseline:
+    initial_raw = getattr(user, "initial_parameters", None) or {}
     return UserBaseline(
         user_id=str(getattr(user, "user_id")),
         broker_server=getattr(user, "broker_server"),
@@ -112,6 +115,9 @@ def _user_to_profile(user: object) -> UserBaseline:
         model_s3_key=getattr(user, "model_s3_key"),
         trained_at=getattr(user, "trained_at"),
         is_baseline_ready=bool(getattr(user, "is_baseline_ready")),
+        maturity_state=UserMaturity(str(getattr(user, "maturity_state", UserMaturity.MATURITY_0.value))),
+        enforce_mode=bool(getattr(user, "enforce_mode", False)),
+        initial_parameters=UserInitialParameters.model_validate(initial_raw),
     )
 
 
@@ -151,6 +157,21 @@ def _trades_to_frame(trades: list[HistoricalTrade]) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _maturity_for_trade_count(trade_count: int, baseline_ready: bool) -> UserMaturity:
+    if baseline_ready and trade_count >= 20:
+        return UserMaturity.MATURITY_2
+    if trade_count > 0:
+        return UserMaturity.MATURITY_1
+    return UserMaturity.MATURITY_0
+
+
+def _next_live_maturity(profile: UserBaseline, brain_loaded: bool, next_trade_count: int) -> UserMaturity:
+    return _maturity_for_trade_count(
+        next_trade_count,
+        profile.is_baseline_ready and brain_loaded,
+    )
 
 
 async def _compute_shap_background(
@@ -193,6 +214,7 @@ async def _train_and_persist_user_model(
                     trade_count=0,
                     is_baseline_ready=False,
                     trained_at=None,
+                    maturity_state=UserMaturity.MATURITY_0.value,
                 )
                 await update_onboarding_job(
                     session,
@@ -228,8 +250,12 @@ async def _train_and_persist_user_model(
                 submission.user_id,
                 model_s3_key=model_key,
                 trade_count=trade_count,
-                is_baseline_ready=trade_count >= job.min_trades,
+                is_baseline_ready=trade_count >= max(20, job.min_trades),
                 trained_at=trained_at,
+                maturity_state=_maturity_for_trade_count(
+                    trade_count,
+                    trade_count >= max(20, job.min_trades),
+                ).value,
             )
             await update_onboarding_job(
                 session,
@@ -379,10 +405,36 @@ async def analyze_trade(
         logger.exception("Failed to load user brain for %s", context.user_id)
         brain = None
 
+    user = await get_user(session, context.user_id)
+    profile = (
+        _user_to_profile(user)
+        if user is not None
+        else UserBaseline(user_id=context.user_id, trade_count=0, is_baseline_ready=False)
+    )
+    try:
+        await cache_manager.cache_behavioral_profile(
+            context.user_id,
+            profile.model_dump(mode="json"),
+        )
+    except Exception:
+        logger.exception("Failed to cache behavioral profile for %s", context.user_id)
+    maturity_state = _maturity_for_trade_count(
+        profile.trade_count,
+        profile.is_baseline_ready and brain is not None,
+    )
+
     if brain is None:
         brain = SentinelBrain()
 
-    assessment = await asyncio.to_thread(brain.assess_risk, context, skip_explanation=True)
+    if maturity_state in {UserMaturity.MATURITY_0, UserMaturity.MATURITY_1}:
+        assessment = await asyncio.to_thread(
+            brain.assess_bootstrap_risk,
+            context,
+            profile.initial_parameters,
+            maturity_state,
+        )
+    else:
+        assessment = await asyncio.to_thread(brain.assess_risk, context, skip_explanation=True)
 
     try:
         await cache_manager.cache_risk_score(cache_key, assessment.model_dump(mode="json"))
@@ -401,7 +453,7 @@ async def analyze_trade(
             signals.append(("drawdown_state", context.drawdown_state, "Account drawdown exceeds 3% threshold"))
         if context.losing_streak >= 3:
             signals.append(("losing_streak", float(context.losing_streak), f"{context.losing_streak} consecutive losses detected"))
-        if context.revenge_timer > 300:
+        if 0 < context.revenge_timer < 300:
             signals.append(("revenge_timer", context.revenge_timer, "Position opened <5 min after a loss — revenge pattern"))
         if context.lot_deviation > 1.5:
             signals.append(("lot_deviation", context.lot_deviation, "Lot size deviates significantly from baseline"))
@@ -430,6 +482,15 @@ async def analyze_trade(
             latency_ms=assessment.latency_ms,
             cached=False,
         )
+        next_trade_count = profile.trade_count + 1
+        next_maturity = _next_live_maturity(profile, brain is not None and brain.is_trained, next_trade_count)
+        await upsert_user(
+            session,
+            context.user_id,
+            trade_count=next_trade_count,
+            maturity_state=next_maturity.value,
+            is_baseline_ready=profile.is_baseline_ready and brain is not None and brain.is_trained,
+        )
         # Only schedule SHAP if user has a real trained model
         if getattr(audit_record, "id", None) is not None and not fallback_explanation:
             background_tasks.add_task(_compute_shap_background, context, context.user_id, audit_record.id)
@@ -456,6 +517,9 @@ async def start_onboarding(
         request.user_id,
         broker_server=request.broker_server,
         account_id=request.account_id,
+        initial_parameters=request.initial_parameters.model_dump(mode="json"),
+        maturity_state=UserMaturity.MATURITY_0.value,
+        enforce_mode=False,
     )
 
     job_id = str(uuid.uuid4())

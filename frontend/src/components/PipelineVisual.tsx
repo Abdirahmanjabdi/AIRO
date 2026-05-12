@@ -1,4 +1,4 @@
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, type LucideIcon } from "lucide-react";
 import { motion } from "framer-motion";
 import SurfacePanel from "@/components/SurfacePanel";
 
@@ -7,7 +7,7 @@ interface PipelineVisualProps {
     key: string;
     label: string;
     description: string;
-    icon: any;
+    icon: LucideIcon;
   }>;
   currentStage: string;
 }

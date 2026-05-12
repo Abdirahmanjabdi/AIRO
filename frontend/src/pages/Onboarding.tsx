@@ -128,7 +128,12 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
   const [brokerServer, setBrokerServer] = useState(identity?.brokerServer ?? "");
   const [accountId, setAccountId] = useState(identity?.accountId ?? "");
   const [readOnlyPassword, setReadOnlyPassword] = useState("");
-  const [minTrades, setMinTrades] = useState(10);
+  const [minTrades, setMinTrades] = useState(20);
+  const [maxDrawdownPct, setMaxDrawdownPct] = useState(3);
+  const [primaryInstrument, setPrimaryInstrument] = useState("NAS100");
+  const [tradingStyle, setTradingStyle] = useState<"scalper" | "intraday" | "swing">("intraday");
+  const [typicalLotSize, setTypicalLotSize] = useState(1);
+  const [maxLotMultiplier, setMaxLotMultiplier] = useState(2);
   const [stage, setStage] = useState<Stage>("IDLE");
   const [jobId, setJobId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -223,6 +228,13 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
         broker_server: brokerServer,
         account_id: accountId,
         min_trades: minTrades,
+        initial_parameters: {
+          max_drawdown_pct: maxDrawdownPct,
+          primary_instrument: primaryInstrument,
+          trading_style: tradingStyle,
+          typical_lot_size: typicalLotSize,
+          max_lot_multiplier: maxLotMultiplier,
+        },
       });
 
       setJobId(onboarding.job_id);
@@ -576,10 +588,118 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
                       <option value="1">Any trades (new account)</option>
                       <option value="5">5 trades</option>
                       <option value="10">10 trades</option>
+                      <option value="20">20 trades</option>
                       <option value="25">25 trades</option>
                       <option value="50">50 trades</option>
                       <option value="100">100 trades</option>
                       <option value="250">250 trades</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2 border border-border/70 bg-background/35 p-4">
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-secondary">
+                      RISK DNA
+                    </div>
+                    <div className="mt-2 text-sm leading-7 text-muted-foreground">
+                      These answers bootstrap the first-session guardrails before Sentinel has
+                      enough personal trading history to graduate the model.
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-drawdown"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      MAX DRAWDOWN BEFORE TILT (%)
+                    </label>
+                    <input
+                      id="risk-dna-drawdown"
+                      type="number"
+                      min="0.1"
+                      max="25"
+                      step="0.1"
+                      value={String(maxDrawdownPct)}
+                      onChange={(event) => setMaxDrawdownPct(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-instrument"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      PRIMARY INSTRUMENT
+                    </label>
+                    <input
+                      id="risk-dna-instrument"
+                      type="text"
+                      value={primaryInstrument}
+                      onChange={(event) => setPrimaryInstrument(event.target.value)}
+                      required
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                      placeholder="NAS100, XAUUSD, EURUSD"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-style"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      TRADING STYLE
+                    </label>
+                    <select
+                      id="risk-dna-style"
+                      value={tradingStyle}
+                      onChange={(event) => setTradingStyle(event.target.value as "scalper" | "intraday" | "swing")}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    >
+                      <option value="scalper">Scalper</option>
+                      <option value="intraday">Intraday</option>
+                      <option value="swing">Swing</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-lot"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      TYPICAL LOT SIZE
+                    </label>
+                    <input
+                      id="risk-dna-lot"
+                      type="number"
+                      min="0.01"
+                      max="500"
+                      step="0.01"
+                      value={String(typicalLotSize)}
+                      onChange={(event) => setTypicalLotSize(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="risk-dna-lot-multiplier"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      MAX LOT MULTIPLIER BEFORE REVIEW
+                    </label>
+                    <select
+                      id="risk-dna-lot-multiplier"
+                      value={String(maxLotMultiplier)}
+                      onChange={(event) => setMaxLotMultiplier(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    >
+                      <option value="1.5">1.5x</option>
+                      <option value="2">2x</option>
+                      <option value="3">3x</option>
+                      <option value="5">5x</option>
                     </select>
                   </div>
                 </div>
@@ -608,7 +728,10 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
                       !userId.trim() ||
                       !brokerServer.trim() ||
                       !accountId.trim() ||
-                      !readOnlyPassword.trim()
+                      !readOnlyPassword.trim() ||
+                      !primaryInstrument.trim() ||
+                      maxDrawdownPct <= 0 ||
+                      typicalLotSize <= 0
                     }
                     className="inline-flex items-center justify-center gap-2 border border-primary/40 bg-primary/10 px-5 py-3 text-[11px] font-bold tracking-[0.18em] text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >

@@ -36,6 +36,8 @@ from sentinel.domain.models import (
     RiskAssessment,
     RiskMode,
     TradeContext,
+    UserInitialParameters,
+    UserMaturity,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,6 +193,56 @@ class SentinelBrain:
                 mode=RiskMode.RISK_OFF,
             )
 
+    def assess_bootstrap_risk(
+        self,
+        context: TradeContext,
+        initial_parameters: UserInitialParameters,
+        maturity_state: UserMaturity,
+    ) -> RiskAssessment:
+        """
+        Cold-start scoring for users without a mature personalized model.
+
+        MATURITY_0 uses the self-declared Risk DNA limits.
+        MATURITY_1 watches relative deviations in shadow mode and never blocks.
+        """
+        start_time = time.perf_counter()
+        risk_score, explanation = self._bootstrap_signals(context, initial_parameters)
+
+        if maturity_state == UserMaturity.MATURITY_1:
+            return RiskAssessment(
+                decision=Decision.ALLOW,
+                risk_score=risk_score,
+                is_anomaly=risk_score >= 0.85,
+                size_multiplier=1.0,
+                explanation=explanation,
+                latency_ms=_elapsed_ms(start_time),
+                mode=RiskMode.SHADOW,
+                maturity_state=maturity_state,
+                shadow_mode=True,
+            )
+
+        if risk_score >= 0.9:
+            decision = Decision.BLOCK
+            size_multiplier = 0.0
+        elif risk_score >= 0.65:
+            decision = Decision.REDUCE_SIZE
+            size_multiplier = max(0.1, 1.0 - (risk_score * self.gentle_slope))
+        else:
+            decision = Decision.ALLOW
+            size_multiplier = 1.0
+
+        return RiskAssessment(
+            decision=decision,
+            risk_score=risk_score,
+            is_anomaly=risk_score >= 0.85,
+            size_multiplier=round(size_multiplier, 4),
+            explanation=explanation,
+            latency_ms=_elapsed_ms(start_time),
+            mode=RiskMode.BOOTSTRAP,
+            maturity_state=maturity_state,
+            shadow_mode=False,
+        )
+
     def _predict(
         self,
         context: TradeContext,
@@ -237,6 +289,7 @@ class SentinelBrain:
             explanation=explanation,
             latency_ms=_elapsed_ms(start_time),
             mode=RiskMode.NORMAL,
+            maturity_state=UserMaturity.MATURITY_2,
         )
 
     # =========================================================================
@@ -377,6 +430,66 @@ class SentinelBrain:
     def _context_to_dataframe(self, context: TradeContext) -> pd.DataFrame:
         """Legacy helper for when feature names are required."""
         return pd.DataFrame(self._context_to_numpy(context), columns=self._feature_columns)
+
+    def _bootstrap_signals(
+        self,
+        context: TradeContext,
+        initial_parameters: UserInitialParameters,
+    ) -> tuple[float, list[FeatureContribution]]:
+        """Score cold-start risk from relative, style-aware signals."""
+        signals: list[tuple[str, float]] = []
+
+        drawdown_limit = initial_parameters.max_drawdown_pct / 100.0
+        if context.drawdown_state > drawdown_limit:
+            signals.append(
+                (
+                    "Drawdown_State",
+                    min(1.0, context.drawdown_state / max(drawdown_limit, 0.001)),
+                )
+            )
+
+        lot_z_score = self._relative_lot_z_score(context.lots, initial_parameters.typical_lot_size)
+        if lot_z_score > 2.0:
+            signals.append(("Lot_ZScore", min(1.0, lot_z_score / 3.0)))
+
+        hard_lot_limit = initial_parameters.typical_lot_size * initial_parameters.max_lot_multiplier
+        if context.lots > hard_lot_limit:
+            signals.append(("Lot_Multiplier", min(1.0, context.lots / max(hard_lot_limit, 0.01))))
+
+        if context.losing_streak >= 3:
+            signals.append(("Losing_Streak", min(1.0, context.losing_streak / 5.0)))
+
+        revenge_threshold = {
+            "scalper": 3.0,
+            "intraday": 10.0,
+            "swing": 60.0,
+        }[initial_parameters.trading_style.value]
+        if 0.0 < context.revenge_timer < revenge_threshold:
+            signals.append(("Revenge_Timer", min(1.0, 1.0 - (context.revenge_timer / revenge_threshold))))
+
+        if not signals:
+            return 0.15, [
+                FeatureContribution(feature="Risk_DNA", impact=0.15),
+            ]
+
+        signals.sort(key=lambda item: item[1], reverse=True)
+        risk_score = min(1.0, 0.25 + sum(score for _, score in signals[:3]) / 2.5)
+        explanation = [
+            FeatureContribution(feature=name, impact=round(score, 4))
+            for name, score in signals[:3]
+        ]
+        return round(risk_score, 4), explanation
+
+    @staticmethod
+    def _relative_lot_z_score(current_lots: float, average_lots: float) -> float:
+        """
+        Style-agnostic lot anomaly proxy for cold start.
+
+        Until enough history exists for a real sigma, use a conservative 25%
+        implied standard deviation around the declared average.
+        """
+        implied_sigma = max(average_lots * 0.25, 0.01)
+        return max(0.0, (current_lots - average_lots) / implied_sigma)
 
     @property
     def is_trained(self) -> bool:

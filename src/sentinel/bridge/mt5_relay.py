@@ -27,6 +27,12 @@ BRAIN_API_URL: str = os.getenv("BRAIN_API_URL", "http://localhost:8000")
 POLL_INTERVAL_SECONDS: float = float(os.getenv("POLL_INTERVAL", "0.5"))
 DECISION_TIMEOUT_SECONDS: float = float(os.getenv("BRAIN_DECISION_TIMEOUT_SECONDS", "0.5"))
 SIGNAL_FILE: str | None = os.getenv("MT5_SIGNAL_FILE")
+ENFORCE_MODE: bool = os.getenv("SENTINEL_ENFORCE_MODE", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 class TradeTelemetry(BaseModel):
@@ -66,6 +72,8 @@ class MT5BridgeRelay:
         self._history_bridge = MT5HistoryBridge(self.brain_url)
         self._mt5_ready = False  # True once MT5 is initialized for live monitoring
         self._monitor_user_id: str = os.getenv("SENTINEL_USER_ID", "")
+        self._mt5_failure_count = 0
+        self._fail_safe_threshold = 5
 
     async def start(self) -> None:
         logger.info("Bridge relay starting. Brain API: %s", self.brain_url)
@@ -153,6 +161,113 @@ class MT5BridgeRelay:
             limit=int(command.get("min_trades", 100)),
         )
 
+    def _fail_safe_close_all(self, reason: str) -> None:
+        if not ENFORCE_MODE:
+            logger.warning("MT5 connection degraded (%s). Audit-only mode leaves positions untouched.", reason)
+            return
+        logger.critical("MT5 connection degraded (%s). Enforce mode closing open positions.", reason)
+        asyncio.create_task(self._close_all_open_positions())
+
+    async def _close_symbol_positions(self, symbol: str) -> None:
+        await self._close_open_positions(symbol_filter=symbol)
+
+    async def _close_all_open_positions(self) -> None:
+        await self._close_open_positions(symbol_filter=None)
+
+    async def _reduce_position(self, symbol: str, lots_to_close: float) -> None:
+        if lots_to_close <= 0:
+            return
+        await self._close_open_positions(symbol_filter=symbol, max_volume=lots_to_close)
+
+    async def _close_open_positions(
+        self,
+        symbol_filter: str | None,
+        max_volume: float | None = None,
+    ) -> None:
+        try:
+            from sentinel.bridge.mt5_history import mt5 as mt5_module
+        except Exception:
+            mt5_module = None
+
+        if mt5_module is None:
+            logger.error("Cannot execute MT5 intervention: MetaTrader5 module is unavailable.")
+            return
+
+        positions = mt5_module.positions_get()
+        if not positions:
+            return
+
+        remaining_volume = max_volume
+        for position in positions:
+            symbol = str(getattr(position, "symbol", "UNKNOWN"))
+            if symbol_filter is not None and symbol != symbol_filter:
+                continue
+
+            volume = float(getattr(position, "volume", 0.0) or 0.0)
+            ticket = int(getattr(position, "ticket", 0) or 0)
+            if volume <= 0:
+                continue
+            if ticket <= 0:
+                logger.error("Cannot intervene on %s: MT5 position has no ticket.", symbol)
+                continue
+            if not await cache_manager.acquire_intervention_lock(ticket):
+                logger.info("Intervention lock already active for ticket %s; skipping duplicate.", ticket)
+                continue
+            if remaining_volume is not None:
+                volume = min(volume, remaining_volume)
+                remaining_volume -= volume
+
+            self._send_close_order(mt5_module, position, volume)
+
+            if remaining_volume is not None and remaining_volume <= 0:
+                return
+
+    def _send_close_order(self, mt5_module: object, position: object, volume: float) -> None:
+        symbol = str(getattr(position, "symbol", "UNKNOWN"))
+        ticket = int(getattr(position, "ticket", 0) or 0)
+        position_type = int(getattr(position, "type", 0) or 0)
+
+        symbol_info_tick = getattr(mt5_module, "symbol_info_tick")
+        tick = symbol_info_tick(symbol)
+        if tick is None:
+            logger.error("Cannot close %s: symbol_info_tick returned no price.", symbol)
+            return
+
+        order_type_sell = int(getattr(mt5_module, "ORDER_TYPE_SELL"))
+        order_type_buy = int(getattr(mt5_module, "ORDER_TYPE_BUY"))
+        position_type_buy = int(getattr(mt5_module, "POSITION_TYPE_BUY"))
+        order_type = (
+            order_type_sell
+            if position_type == position_type_buy
+            else order_type_buy
+        )
+        price_attr = "bid" if order_type == order_type_sell else "ask"
+        price = float(getattr(tick, price_attr))
+
+        request = {
+            "action": getattr(mt5_module, "TRADE_ACTION_DEAL"),
+            "symbol": symbol,
+            "volume": round(volume, 2),
+            "type": order_type,
+            "position": ticket,
+            "price": price,
+            "deviation": 20,
+            "magic": 760501,
+            "comment": "Sentinel Guardian intervention",
+            "type_time": getattr(mt5_module, "ORDER_TIME_GTC"),
+            "type_filling": getattr(mt5_module, "ORDER_FILLING_IOC"),
+        }
+        order_send = getattr(mt5_module, "order_send")
+        result = order_send(request)
+        if result is None:
+            logger.error("MT5 close order returned no result for %s ticket %s", symbol, ticket)
+            return
+        retcode = int(getattr(result, "retcode", -1))
+        if retcode != int(getattr(mt5_module, "TRADE_RETCODE_DONE")):
+            logger.error("MT5 close order failed for %s ticket %s: %s", symbol, ticket, result)
+            return
+        logger.warning("Sentinel Guardian closed %.2f lots on %s ticket %s", volume, symbol, ticket)
+
     async def _poll_and_relay(self) -> None:
         telemetry = self._poll_mt5_for_signal()
         if telemetry is None:
@@ -162,7 +277,7 @@ class MT5BridgeRelay:
         await cache_manager.set_heartbeat(telemetry.user_id)
         decision = await self._send_to_brain(telemetry)
         if decision is not None:
-            self._execute_decision(decision, telemetry)
+            await self._execute_decision(decision, telemetry)
 
     async def _send_to_brain(self, telemetry: TradeTelemetry) -> BrainDecision | None:
         assert self._client is not None
@@ -239,8 +354,14 @@ class MT5BridgeRelay:
 
         try:
             positions = mt5_module.positions_get()
+            self._mt5_failure_count = 0
         except Exception as exc:
             logger.debug("MT5 positions_get failed: %s", exc)
+            self._mt5_failure_count += 1
+            if self._mt5_failure_count >= self._fail_safe_threshold and self._terminal_disconnected(mt5_module):
+                self._fail_safe_close_all(
+                    f"positions_get failed {self._mt5_failure_count} consecutive times with terminal disconnect"
+                )
             self._mt5_ready = False  # Force re-init next cycle
             return None
 
@@ -304,7 +425,14 @@ class MT5BridgeRelay:
             trend_momentum=0.0,
         )
 
-    def _execute_decision(
+    def _terminal_disconnected(self, mt5_module: object) -> bool:
+        terminal_info = getattr(mt5_module, "terminal_info")
+        try:
+            return terminal_info() is None
+        except Exception:
+            return True
+
+    async def _execute_decision(
         self,
         decision: BrainDecision,
         telemetry: TradeTelemetry,
@@ -327,6 +455,10 @@ class MT5BridgeRelay:
                 telemetry.lots,
                 adjusted_lots,
             )
+            if ENFORCE_MODE:
+                await self._reduce_position(telemetry.symbol, telemetry.lots - adjusted_lots)
+            else:
+                logger.info("Audit-only mode: reduce decision was not executed.")
             return
 
         logger.warning(
@@ -336,6 +468,10 @@ class MT5BridgeRelay:
             decision.risk_score * 100,
             decision.is_anomaly,
         )
+        if ENFORCE_MODE:
+            await self._close_symbol_positions(telemetry.symbol)
+        else:
+            logger.info("Audit-only mode: block decision was not executed.")
 
     def _shutdown_handler(self, signum: int, frame: object) -> None:
         logger.info("Shutdown signal received (%d). Stopping relay...", signum)

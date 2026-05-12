@@ -6,7 +6,9 @@ export type OnboardingState =
   | "blank_baseline"
   | "ready"
   | "failed";
-export type RiskMode = "normal" | "risk_off" | "baseline_pending";
+export type RiskMode = "normal" | "risk_off" | "baseline_pending" | "shadow" | "bootstrap";
+export type UserMaturity = "maturity_0" | "maturity_1" | "maturity_2";
+export type TradingStyle = "scalper" | "intraday" | "swing";
 
 export interface FeatureContribution {
   feature: string;
@@ -37,6 +39,17 @@ export interface UserBaseline {
   is_baseline_ready: boolean;
   risk_threshold: number;
   contamination: number;
+  maturity_state: UserMaturity;
+  enforce_mode: boolean;
+  initial_parameters: UserInitialParameters;
+}
+
+export interface UserInitialParameters {
+  max_drawdown_pct: number;
+  primary_instrument: string;
+  trading_style: TradingStyle;
+  typical_lot_size: number;
+  max_lot_multiplier: number;
 }
 
 export interface CredentialResponse {
@@ -124,6 +137,8 @@ export interface RiskAssessment {
   explanation: FeatureContribution[];
   latency_ms: number;
   mode: RiskMode;
+  maturity_state: UserMaturity | null;
+  shadow_mode: boolean;
 }
 
 export interface AnalyzeTradeRequest {
@@ -152,6 +167,12 @@ export interface OnboardingRequest {
   broker_server: string;
   account_id: string;
   min_trades?: number;
+  initial_parameters?: UserInitialParameters;
+}
+
+export interface BridgeProvisioningMessage {
+  status: "pulling_image" | "booting" | "initialized";
+  message: string;
 }
 
 export class ApiError extends Error {
@@ -323,8 +344,8 @@ export const sentinelApi = {
   },
 
   // Mock WebSocket Handshake
-  wsBridgeProvisioning(podId: string, onMessage: (msg: any) => void): () => void {
-    const sequence = [
+  wsBridgeProvisioning(podId: string, onMessage: (msg: BridgeProvisioningMessage) => void): () => void {
+    const sequence: BridgeProvisioningMessage[] = [
       { status: "pulling_image", message: "Spinning up AWS Windows Server Pod..." },
       { status: "booting", message: "Starting MetaTrader 5 Terminal via bridge..." },
       { status: "initialized", message: "mt5.initialize() successful. Handshake complete." }

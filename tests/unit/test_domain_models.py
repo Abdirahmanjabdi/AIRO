@@ -175,7 +175,7 @@ class TestOnboardingStatus:
                 user_id="user-123",
                 broker_server="ICMarkets-Demo",
                 account_id="12345678",
-                min_trades=10,  # Invalid: < 50
+                min_trades=0,
             )
 
 

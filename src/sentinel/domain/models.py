@@ -40,6 +40,39 @@ class RiskMode(str, Enum):
     NORMAL = "normal"
     RISK_OFF = "risk_off"
     BASELINE_PENDING = "baseline_pending"
+    SHADOW = "shadow"
+    BOOTSTRAP = "bootstrap"
+
+
+class UserMaturity(str, Enum):
+    """Cold-start maturity lane for a user's behavioral model."""
+
+    MATURITY_0 = "maturity_0"
+    MATURITY_1 = "maturity_1"
+    MATURITY_2 = "maturity_2"
+
+
+class TradingStyle(str, Enum):
+    """Self-declared trading cadence captured during onboarding."""
+
+    SCALPER = "scalper"
+    INTRADAY = "intraday"
+    SWING = "swing"
+
+
+class UserInitialParameters(BaseModel):
+    """Risk DNA survey values used before enough trade history exists."""
+
+    max_drawdown_pct: float = Field(default=3.0, ge=0.1, le=25.0)
+    primary_instrument: str = Field(default="FX", min_length=1, max_length=32)
+    trading_style: TradingStyle = Field(default=TradingStyle.INTRADAY)
+    typical_lot_size: float = Field(default=1.0, gt=0.0, le=500.0)
+    max_lot_multiplier: float = Field(default=2.0, ge=1.0, le=10.0)
+
+    @field_validator("primary_instrument")
+    @classmethod
+    def normalize_instrument(cls, value: str) -> str:
+        return value.strip().upper()
 
 
 class TradeContext(BaseModel):
@@ -84,6 +117,8 @@ class RiskAssessment(BaseModel):
     explanation: list[FeatureContribution] = Field(default_factory=list)
     latency_ms: float = Field(..., ge=0.0)
     mode: RiskMode = Field(default=RiskMode.NORMAL)
+    maturity_state: UserMaturity | None = None
+    shadow_mode: bool = False
 
 
 class UserBaseline(BaseModel):
@@ -98,15 +133,18 @@ class UserBaseline(BaseModel):
     is_baseline_ready: bool = False
     risk_threshold: float = 0.6537
     contamination: float = 0.0399
+    maturity_state: UserMaturity = UserMaturity.MATURITY_0
+    enforce_mode: bool = False
+    initial_parameters: UserInitialParameters = Field(default_factory=UserInitialParameters)
 
     @field_validator("is_baseline_ready")
     @classmethod
     def validate_baseline(cls, value: bool, info: object) -> bool:
         data = getattr(info, "data", {})
         trade_count = data.get("trade_count", 0)
-        if value and trade_count < 1:
+        if value and trade_count < 20:
             raise ValueError(
-                f"Cannot be baseline_ready with only {trade_count} trades (min 1)"
+                f"Cannot be baseline_ready with only {trade_count} trades (min 20)"
             )
         return value
 
@@ -117,7 +155,8 @@ class OnboardingRequest(BaseModel):
     user_id: str = Field(..., min_length=1)
     broker_server: str = Field(..., min_length=1)
     account_id: str = Field(..., min_length=1)
-    min_trades: int = Field(default=10, ge=1, le=500)
+    min_trades: int = Field(default=20, ge=1, le=500)
+    initial_parameters: UserInitialParameters = Field(default_factory=UserInitialParameters)
 
 
 class CredentialRequest(BaseModel):

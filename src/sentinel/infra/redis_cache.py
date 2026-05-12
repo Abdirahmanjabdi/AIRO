@@ -27,7 +27,16 @@ class InMemoryRedis:
     async def aclose(self) -> None:
         return None
 
-    async def set(self, key: str, value: str, ex: int | None = None) -> bool:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        _ = ex
+        if nx and key in self._values:
+            return False
         self._values[key] = value
         return True
 
@@ -36,6 +45,9 @@ class InMemoryRedis:
 
     async def exists(self, key: str) -> int:
         return 1 if key in self._values else 0
+
+    async def ttl(self, key: str) -> int:
+        return 60 if key in self._values else -2
 
     async def rpush(self, key: str, value: str) -> None:
         _ = key
@@ -83,12 +95,39 @@ class CacheManager:
         fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         return f"risk:{user_id}:{fingerprint}"
 
+    def build_behavioral_profile_key(self, user_id: str) -> str:
+        return f"profile:{user_id}:behavioral"
+
+    def build_intervention_lock_key(self, ticket_id: int) -> str:
+        return f"intervention:{ticket_id}"
+
     async def cache_risk_score(self, key: str, assessment: dict[str, Any]) -> None:
         await self.r.set(key, json.dumps(assessment), ex=self.risk_score_ttl)
 
     async def get_cached_risk(self, key: str) -> dict[str, Any] | None:
         raw = await self.r.get(key)
         return json.loads(raw) if raw else None
+
+    async def cache_behavioral_profile(self, user_id: str, profile: dict[str, Any]) -> None:
+        await self.r.set(
+            self.build_behavioral_profile_key(user_id),
+            json.dumps(profile, sort_keys=True),
+            ex=300,
+        )
+
+    async def get_behavioral_profile(self, user_id: str) -> dict[str, Any] | None:
+        raw = await self.r.get(self.build_behavioral_profile_key(user_id))
+        return json.loads(raw) if raw else None
+
+    async def acquire_intervention_lock(self, ticket_id: int, ttl_seconds: int = 10) -> bool:
+        return bool(
+            await self.r.set(
+                self.build_intervention_lock_key(ticket_id),
+                "locked",
+                ex=ttl_seconds,
+                nx=True,
+            )
+        )
 
     async def set_heartbeat(self, user_id: str) -> bool:
         ttl = await self.r.ttl(f"presence:{user_id}")
