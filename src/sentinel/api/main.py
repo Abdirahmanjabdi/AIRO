@@ -16,10 +16,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sentinel.api.dependencies import initialize_runtime, shutdown_runtime
+from sentinel.api.dependencies import initialize_runtime, require_api_key, shutdown_runtime
 from sentinel.api.middleware import RequestIdMiddleware
 from sentinel.api.routes.analysis import router as analysis_router
 from sentinel.api.routes.health import router as health_router
@@ -68,4 +68,9 @@ app.add_middleware(RequestIdMiddleware)
 
 # --- Routes ---
 app.include_router(health_router, tags=["Health"])
-app.include_router(analysis_router, prefix="/v1", tags=["Analysis"])
+app.include_router(
+    analysis_router,
+    prefix="/v1",
+    tags=["Analysis"],
+    dependencies=[Depends(require_api_key)],
+)

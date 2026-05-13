@@ -4,6 +4,7 @@ export interface SentinelIdentity {
   userId: string;
   brokerServer: string;
   accountId: string;
+  apiKey: string;
 }
 
 const STORAGE_KEY = "sentinel-zero.identity";
@@ -29,7 +30,7 @@ function readStoredIdentity(): SentinelIdentity | null {
     const identity = "identity" in parsed ? parsed.identity : parsed;
     const savedAt = "savedAt" in parsed ? parsed.savedAt : 0;
 
-    if (!identity.userId || !identity.brokerServer || !identity.accountId) {
+    if (!identity.userId || !identity.brokerServer || !identity.accountId || !identity.apiKey) {
       return null;
     }
 

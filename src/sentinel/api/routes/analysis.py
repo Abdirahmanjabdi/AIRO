@@ -52,9 +52,11 @@ from sentinel.infra.db import (
     get_onboarding_job,
     get_user,
     list_api_credentials,
+    list_behavioral_logs,
     list_onboarding_jobs,
     list_risk_audits,
     list_users,
+    record_behavioral_log,
     record_risk_audit,
     upsert_api_credential,
     update_onboarding_job,
@@ -157,6 +159,71 @@ def _trades_to_frame(trades: list[HistoricalTrade]) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _behavioral_logs_to_training_frame(logs: list[object]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for log in reversed(logs):
+        decision = str(getattr(log, "decision", Decision.ALLOW.value))
+        risk_score = float(getattr(log, "risk_score", 0.0) or 0.0)
+        rows.append(
+            {
+                "Hour_Decimal": float(getattr(log, "hour_decimal", 0.0) or 0.0),
+                "Losing_Streak": int(getattr(log, "losing_streak", 0) or 0),
+                "Drawdown_State": float(getattr(log, "drawdown_state", 0.0) or 0.0),
+                "Lot_Deviation": float(getattr(log, "lot_deviation", 0.0) or 0.0),
+                "Revenge_Timer": float(getattr(log, "revenge_timer", 9999.0) or 9999.0),
+                "Lots": float(getattr(log, "lots", 1.0) or 1.0),
+                "RR Ratio": float(getattr(log, "rr_ratio", 1.0) or 1.0),
+                "Realized_Vol_20": float(getattr(log, "realized_vol_20", 0.0) or 0.0),
+                "Trend_Momentum": float(getattr(log, "trend_momentum", 0.0) or 0.0),
+                "Is_High_Risk": int(
+                    bool(getattr(log, "is_anomaly", False))
+                    or decision in {Decision.BLOCK.value, Decision.REDUCE_SIZE.value}
+                    or risk_score >= 0.85
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+async def _retrain_user_model_from_behavioral_logs(user_id: str) -> None:
+    if not await cache_manager.acquire_retraining_lock(user_id):
+        logger.info("Retraining already active for %s; skipping duplicate trigger.", user_id)
+        return
+
+    async with AsyncSessionLocal() as session:
+        try:
+            logs = await list_behavioral_logs(session, user_id=user_id, limit=500)
+            if len(logs) < 20:
+                logger.info("Skipping retrain for %s: only %d behavioral logs.", user_id, len(logs))
+                return
+
+            training_frame = _behavioral_logs_to_training_frame(logs)
+            brain = SentinelBrain()
+            await asyncio.to_thread(brain.train, training_frame)
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".joblib") as handle:
+                model_path = Path(handle.name)
+
+            await asyncio.to_thread(brain.save, model_path)
+            model_key = await asyncio.to_thread(model_store.upload_model, user_id, model_path)
+            model_path.unlink(missing_ok=True)
+
+            trained_at = datetime.now(timezone.utc)
+            await upsert_user(
+                session,
+                user_id,
+                model_s3_key=model_key,
+                trade_count=len(logs),
+                is_baseline_ready=True,
+                trained_at=trained_at,
+                maturity_state=UserMaturity.MATURITY_2.value,
+            )
+            cache_user_brain(user_id, model_key, brain)
+            logger.info("Retrained personalized model for %s from %d behavioral logs.", user_id, len(logs))
+        except Exception:
+            logger.exception("Behavioral-log retraining failed for %s", user_id)
 
 
 def _maturity_for_trade_count(trade_count: int, baseline_ready: bool) -> UserMaturity:
@@ -414,7 +481,11 @@ async def analyze_trade(
     try:
         await cache_manager.cache_behavioral_profile(
             context.user_id,
-            profile.model_dump(mode="json"),
+            {
+                **profile.model_dump(mode="json"),
+                "avg_lots": context.lots,
+                "std_lots": max(context.lots * 0.25, 0.01),
+            },
         )
     except Exception:
         logger.exception("Failed to cache behavioral profile for %s", context.user_id)
@@ -482,6 +553,25 @@ async def analyze_trade(
             latency_ms=assessment.latency_ms,
             cached=False,
         )
+        await record_behavioral_log(
+            session,
+            user_id=context.user_id,
+            audit_id=getattr(audit_record, "id", None),
+            symbol=context.symbol,
+            hour_decimal=context.hour_decimal,
+            losing_streak=context.losing_streak,
+            drawdown_state=context.drawdown_state,
+            lot_deviation=context.lot_deviation,
+            revenge_timer=context.revenge_timer,
+            lots=context.lots,
+            rr_ratio=context.rr_ratio,
+            realized_vol_20=context.realized_vol_20,
+            trend_momentum=context.trend_momentum,
+            decision=assessment.decision.value,
+            risk_score=assessment.risk_score,
+            size_multiplier=assessment.size_multiplier,
+            is_anomaly=assessment.is_anomaly,
+        )
         next_trade_count = profile.trade_count + 1
         next_maturity = _next_live_maturity(profile, brain is not None and brain.is_trained, next_trade_count)
         await upsert_user(
@@ -491,6 +581,22 @@ async def analyze_trade(
             maturity_state=next_maturity.value,
             is_baseline_ready=profile.is_baseline_ready and brain is not None and brain.is_trained,
         )
+        recent_logs = await list_behavioral_logs(session, user_id=context.user_id, limit=500)
+        if recent_logs:
+            lot_values = pd.Series([float(getattr(log, "lots", 0.0) or 0.0) for log in recent_logs])
+            await cache_manager.cache_behavioral_profile(
+                context.user_id,
+                {
+                    **profile.model_dump(mode="json"),
+                    "trade_count": next_trade_count,
+                    "maturity_state": next_maturity.value,
+                    "avg_lots": round(float(lot_values.mean()), 6),
+                    "std_lots": round(max(float(lot_values.std(ddof=0) or 0.0), 0.01), 6),
+                    "last_trade_count": next_trade_count,
+                },
+            )
+        if next_trade_count >= 20 and next_trade_count % 20 == 0:
+            background_tasks.add_task(_retrain_user_model_from_behavioral_logs, context.user_id)
         # Only schedule SHAP if user has a real trained model
         if getattr(audit_record, "id", None) is not None and not fallback_explanation:
             background_tasks.add_task(_compute_shap_background, context, context.user_id, audit_record.id)
@@ -533,6 +639,19 @@ async def start_onboarding(
         state=OnboardingState.PENDING.value,
         message="Onboarding accepted. Waiting for MT5 bridge verification.",
     )
+    raw_api_key = f"sz_live_{secrets.token_urlsafe(24)}"
+    helm_release = _build_helm_release(request.user_id)
+    helm_command = _build_helm_command(request.user_id, "direct", helm_release)
+    await upsert_api_credential(
+        session,
+        user_id=request.user_id,
+        email=f"{request.user_id}@direct.sentinel.local",
+        plan="direct",
+        raw_api_key=raw_api_key,
+        helm_release=helm_release,
+        helm_command=helm_command,
+        provisioning_state="onboarding_key_issued",
+    )
 
     async def publish_onboarding_command() -> None:
         command = {
@@ -553,7 +672,10 @@ async def start_onboarding(
             )
 
     background_tasks.add_task(publish_onboarding_command)
-    return _job_to_status(job)
+    status_response = _job_to_status(job)
+    status_response.api_key = raw_api_key
+    status_response.api_key_last4 = raw_api_key[-4:]
+    return status_response
 
 
 @router.get(

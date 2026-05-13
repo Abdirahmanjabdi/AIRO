@@ -7,17 +7,20 @@ Shared runtime services and model-loading helpers.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import tempfile
 from pathlib import Path
 
 import pandas as pd
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.brain.feature_engine import engineer_features
 from sentinel.brain.risk_engine import SentinelBrain
-from sentinel.infra.db import AsyncSessionLocal, get_user, init_db
+from sentinel.infra.db import AsyncSessionLocal, get_db, get_user, init_db, validate_api_key
+from sentinel.infra.data_lake import data_lake_exporter
 from sentinel.infra.redis_cache import cache_manager
 from sentinel.infra.s3 import model_store
 
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _default_brain: SentinelBrain | None = None
 _user_brain_cache: dict[str, tuple[str, SentinelBrain]] = {}
+_data_lake_task: asyncio.Task[None] | None = None
 
 
 def _existing_path(candidates: list[Path]) -> Path | None:
@@ -39,6 +43,21 @@ async def _ensure_model_store_background() -> None:
         await asyncio.to_thread(model_store.ensure_bucket)
     except Exception:
         logger.exception("Model store initialization failed")
+
+
+async def _data_lake_export_loop() -> None:
+    interval_seconds = int(os.getenv("DATA_LAKE_EXPORT_INTERVAL_SECONDS", "86400"))
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            async with AsyncSessionLocal() as session:
+                key = await data_lake_exporter.export_day(session)
+            if key is not None:
+                logger.info("Behavioral data lake export complete: s3://%s/%s", data_lake_exporter.bucket, key)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Behavioral data lake export failed")
 
 
 def load_default_model() -> None:
@@ -100,6 +119,7 @@ def load_default_model() -> None:
 
 
 async def initialize_runtime() -> None:
+    global _data_lake_task
     try:
         await init_db()
     except Exception:
@@ -113,8 +133,22 @@ async def initialize_runtime() -> None:
     except Exception:
         logger.exception("Redis connectivity check failed during startup")
 
+    if os.getenv("SENTINEL_ENABLE_DATA_LAKE_EXPORT", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        _data_lake_task = asyncio.create_task(_data_lake_export_loop())
+
 
 async def shutdown_runtime() -> None:
+    global _data_lake_task
+    if _data_lake_task is not None:
+        _data_lake_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _data_lake_task
+        _data_lake_task = None
     try:
         await cache_manager.close()
     except Exception:
@@ -159,3 +193,36 @@ def cache_user_brain(user_id: str, model_key: str, brain: SentinelBrain) -> None
 
 async def get_cache_manager() -> object:
     return cache_manager
+
+
+async def require_api_key(
+    request: Request,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    if os.getenv("SENTINEL_AUTH_DISABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
+
+    bootstrap_routes = {
+        ("POST", "/v1/credentials"),
+        ("POST", "/v1/onboard"),
+    }
+    if (request.method, request.url.path) in bootstrap_routes:
+        return
+
+    if not x_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-API-Key header.",
+        )
+
+    if not await validate_api_key(session, x_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API key.",
+        )

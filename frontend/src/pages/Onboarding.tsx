@@ -236,9 +236,15 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
           max_lot_multiplier: maxLotMultiplier,
         },
       });
+      const apiKey = onboarding.api_key;
+      if (!apiKey) {
+        throw new Error("Onboarding did not return an API key for this session.");
+      }
+      onConnected({ userId, brokerServer, accountId, apiKey });
 
       setJobId(onboarding.job_id);
       appendLog(`> Job accepted: ${onboarding.job_id}`);
+      appendLog(`> API key issued for this browser session: ****${onboarding.api_key_last4 ?? apiKey.slice(-4)}`);
       appendLog(`> ${onboarding.message}`);
 
       for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -261,7 +267,6 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
         appendLog(`> ${status.message}`);
 
         if (status.state === "ready") {
-          onConnected({ userId, brokerServer, accountId });
           setCompletionState("ready");
           setStage("LIVE");
           setIsBusy(false);
@@ -270,7 +275,6 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
         }
 
         if (status.state === "blank_baseline") {
-          onConnected({ userId, brokerServer, accountId });
           setCompletionState("blank_baseline");
           setStage("LIVE");
           setIsBusy(false);

@@ -101,6 +101,9 @@ class CacheManager:
     def build_intervention_lock_key(self, ticket_id: int) -> str:
         return f"intervention:{ticket_id}"
 
+    def build_retraining_lock_key(self, user_id: str) -> str:
+        return f"retrain:{user_id}"
+
     async def cache_risk_score(self, key: str, assessment: dict[str, Any]) -> None:
         await self.r.set(key, json.dumps(assessment), ex=self.risk_score_ttl)
 
@@ -123,6 +126,16 @@ class CacheManager:
         return bool(
             await self.r.set(
                 self.build_intervention_lock_key(ticket_id),
+                "locked",
+                ex=ttl_seconds,
+                nx=True,
+            )
+        )
+
+    async def acquire_retraining_lock(self, user_id: str, ttl_seconds: int = 300) -> bool:
+        return bool(
+            await self.r.set(
+                self.build_retraining_lock_key(user_id),
                 "locked",
                 ex=ttl_seconds,
                 nx=True,

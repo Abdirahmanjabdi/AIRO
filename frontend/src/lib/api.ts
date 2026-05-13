@@ -67,6 +67,8 @@ export interface OnboardingStatus {
   model_s3_key: string | null;
   created_at: string;
   completed_at: string | null;
+  api_key: string | null;
+  api_key_last4: string | null;
 }
 
 export interface RiskAuditRecord {
@@ -210,6 +212,19 @@ function resolveApiBaseUrl(): string {
   return `${protocol}//${hostname}:8000`;
 }
 
+function getStoredApiKey(): string | null {
+  try {
+    const raw = window.localStorage.getItem("sentinel-zero.identity");
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { identity?: { apiKey?: string }; apiKey?: string };
+    return parsed.identity?.apiKey || parsed.apiKey || null;
+  } catch {
+    return null;
+  }
+}
+
 export function getApiBaseUrl(): string {
   return resolveApiBaseUrl();
 }
@@ -256,12 +271,17 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number) {
 async function apiRequest<T>(path: string, init?: ApiRequestOptions): Promise<T> {
   const { timeoutMs = 15000, headers, signal, ...rest } = init || {};
   const timeout = withTimeout(signal, timeoutMs);
+  const apiKey = path.startsWith("/v1/") ? getStoredApiKey() : null;
 
   const finalHeaders =
     rest.body instanceof FormData
-      ? headers
+      ? {
+          ...(apiKey ? { "X-API-Key": apiKey } : {}),
+          ...(headers || {}),
+        }
       : {
           ...(rest.body ? { "Content-Type": "application/json" } : {}),
+          ...(apiKey ? { "X-API-Key": apiKey } : {}),
           ...(headers || {}),
         };
 

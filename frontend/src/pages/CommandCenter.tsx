@@ -50,6 +50,7 @@ export default function CommandCenter({
   onRefresh,
 }: CommandCenterProps) {
   const [isKillSwitchOpen, setIsKillSwitchOpen] = useState(false);
+  const [operatorAction, setOperatorAction] = useState<string | null>(null);
 
   useEffect(() => {
     const latest = dashboard?.latest_assessment;
@@ -196,15 +197,28 @@ export default function CommandCenter({
             </div>
             {latest?.decision !== "ALLOW" && latest && (
               <div className="flex gap-2 mt-3 sm:mt-0">
-                <button className="px-3 py-1.5 text-[10px] font-bold tracking-widest border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setOperatorAction("Decision approved for audit review.")}
+                  className="px-3 py-1.5 text-[10px] font-bold tracking-widest border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                >
                   APPROVE
                 </button>
-                <button className="px-3 py-1.5 text-[10px] font-bold tracking-widest border border-border text-muted-foreground hover:text-foreground transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setOperatorAction("Override recorded. Sentinel will continue monitoring this identity.")}
+                  className="px-3 py-1.5 text-[10px] font-bold tracking-widest border border-border text-muted-foreground hover:text-foreground transition-colors"
+                >
                   OVERRIDE & MONITOR
                 </button>
               </div>
             )}
           </div>
+          {operatorAction ? (
+            <div className="mt-4 border border-secondary/30 bg-secondary/10 px-3 py-2 text-xs leading-6 text-secondary">
+              {operatorAction}
+            </div>
+          ) : null}
         </SurfacePanel>
       </Reveal>
 

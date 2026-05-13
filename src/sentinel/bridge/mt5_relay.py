@@ -269,7 +269,7 @@ class MT5BridgeRelay:
         logger.warning("Sentinel Guardian closed %.2f lots on %s ticket %s", volume, symbol, ticket)
 
     async def _poll_and_relay(self) -> None:
-        telemetry = self._poll_mt5_for_signal()
+        telemetry = await self._poll_mt5_for_signal()
         if telemetry is None:
             return
 
@@ -326,7 +326,7 @@ class MT5BridgeRelay:
                 latency_ms=(time.perf_counter() - started_at) * 1000,
             )
 
-    def _poll_mt5_for_signal(self) -> TradeTelemetry | None:
+    async def _poll_mt5_for_signal(self) -> TradeTelemetry | None:
         """
         Live position monitor for manual traders.
         Reads open MT5 positions directly every poll cycle and derives
@@ -372,6 +372,7 @@ class MT5BridgeRelay:
         symbol = str(getattr(pos, "symbol", "UNKNOWN"))
         lots = float(getattr(pos, "volume", 0.01))
         open_time_ts = int(getattr(pos, "time", 0))
+        user_id = self._monitor_user_id or os.getenv("SENTINEL_USER_ID", "Chllanger-01")
 
         account = None
         try:
@@ -389,7 +390,16 @@ class MT5BridgeRelay:
 
         from datetime import datetime, timezone
         hour_decimal = datetime.now(timezone.utc).hour + datetime.now(timezone.utc).minute / 60.0
-        lot_deviation = max(0.0, round(lots / 0.01 - 1.0, 2))
+        lot_deviation = 0.0
+        try:
+            profile = await cache_manager.get_behavioral_profile(user_id)
+            avg_lots = float((profile or {}).get("avg_lots", lots) or lots)
+            std_lots = max(float((profile or {}).get("std_lots", avg_lots * 0.25) or 0.0), 0.01)
+            lot_deviation = max(0.0, round((lots - avg_lots) / std_lots, 2))
+        except Exception as exc:
+            logger.debug("Could not load behavioral lot baseline for %s: %s", user_id, exc)
+            implied_sigma = max(lots * 0.25, 0.01)
+            lot_deviation = max(0.0, round((lots - lots) / implied_sigma, 2))
 
         losing_streak = 0
         try:
@@ -406,8 +416,6 @@ class MT5BridgeRelay:
                         break
         except Exception:
             pass
-
-        user_id = self._monitor_user_id or os.getenv("SENTINEL_USER_ID", "Chllanger-01")
 
         logger.info("Live position: %s %.2f lots | drawdown=%.2f%% | streak=%d", symbol, lots, drawdown_state * 100, losing_streak)
 

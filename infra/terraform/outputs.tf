@@ -20,5 +20,10 @@ output "model_bucket_name" {
 
 output "redis_endpoint" {
   description = "Redis endpoint for runtime wiring"
-  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
+  value       = aws_elasticache_replication_group.redis.configuration_endpoint_address
+}
+
+output "karpenter_node_role_name" {
+  description = "IAM role used by Karpenter-provisioned MT5 nodes"
+  value       = module.karpenter.node_iam_role_name
 }

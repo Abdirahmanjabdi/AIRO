@@ -129,6 +129,14 @@ class SentinelBrain:
         """
         X: pd.DataFrame = df[self._feature_columns].fillna(0)
         y: pd.Series = df["Is_High_Risk"]
+        if y.nunique() < 2:
+            synthetic = X.iloc[[0]].copy()
+            synthetic["Losing_Streak"] = 5.0
+            synthetic["Drawdown_State"] = max(float(X["Drawdown_State"].max()), 0.05)
+            synthetic["Lot_Deviation"] = max(float(X["Lot_Deviation"].max()), 3.0)
+            synthetic["Revenge_Timer"] = min(float(X["Revenge_Timer"].min()), 1.0)
+            X = pd.concat([X, synthetic], ignore_index=True)
+            y = pd.concat([y, pd.Series([1 - int(y.iloc[0])])], ignore_index=True)
 
         logger.info("Training SentinelBrain on %d trades...", len(df))
 
@@ -258,7 +266,13 @@ class SentinelBrain:
         is_anomaly: bool = anomaly_score == -1
 
         # 2. Risk Classification (Analyst)
-        risk_prob: float = float(self.classifier.predict_proba(X_input)[0][1])
+        class_probs = self.classifier.predict_proba(X_input)[0]
+        positive_indices = np.where(self.classifier.classes_ == 1)[0]
+        risk_prob: float = (
+            float(class_probs[int(positive_indices[0])])
+            if len(positive_indices) > 0
+            else 0.0
+        )
 
         # 3. Active Sizing (PI Controller — V4/V5 logic)
         size_multiplier: float

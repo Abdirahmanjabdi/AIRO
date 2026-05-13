@@ -207,6 +207,8 @@ class OnboardingStatus(BaseModel):
     model_s3_key: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None
+    api_key: str | None = None
+    api_key_last4: str | None = None
 
 
 class RiskAuditRecord(BaseModel):
