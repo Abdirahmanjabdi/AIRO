@@ -35,6 +35,7 @@ from sentinel.domain.models import (
     FeatureContribution,
     RiskAssessment,
     RiskMode,
+    TiltResponse,
     TradeContext,
     UserInitialParameters,
     UserMaturity,
@@ -470,16 +471,29 @@ class SentinelBrain:
         if context.lots > hard_lot_limit:
             signals.append(("Lot_Multiplier", min(1.0, context.lots / max(hard_lot_limit, 0.01))))
 
-        if context.losing_streak >= 3:
-            signals.append(("Losing_Streak", min(1.0, context.losing_streak / 5.0)))
+        loss_threshold = max(initial_parameters.loss_review_threshold, 1)
+        if context.losing_streak >= loss_threshold:
+            signals.append(
+                (
+                    "Loss_Review_Threshold",
+                    min(1.0, context.losing_streak / max(float(loss_threshold + 2), 1.0)),
+                )
+            )
 
         revenge_threshold = {
             "scalper": 3.0,
             "intraday": 10.0,
             "swing": 60.0,
         }[initial_parameters.trading_style.value]
+        if initial_parameters.tilt_response == TiltResponse.IMMEDIATE_REENTRY:
+            revenge_threshold *= 1.5
+        elif initial_parameters.tilt_response == TiltResponse.MIXED:
+            revenge_threshold *= 1.2
         if 0.0 < context.revenge_timer < revenge_threshold:
-            signals.append(("Revenge_Timer", min(1.0, 1.0 - (context.revenge_timer / revenge_threshold))))
+            revenge_signal = min(1.0, 1.0 - (context.revenge_timer / revenge_threshold))
+            if initial_parameters.tilt_response == TiltResponse.IMMEDIATE_REENTRY:
+                revenge_signal = min(1.0, revenge_signal * 1.15)
+            signals.append(("Tilt_Reentry_Timer", revenge_signal))
 
         if not signals:
             return 0.15, [

@@ -78,6 +78,20 @@ describe("frontend product shell", () => {
     expect(screen.getByRole("option", { name: "100 trades" })).toBeInTheDocument();
   });
 
+  it("renders the five Risk DNA survey controls", () => {
+    render(
+      <MemoryRouter>
+        <Onboarding identity={null} onConnected={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText("TYPICAL ROUND-TRIP TRADES PER DAY")).toBeInTheDocument();
+    expect(screen.getByLabelText("STANDARD UNIT LOT SIZE FOR $100K")).toBeInTheDocument();
+    expect(screen.getByLabelText("AVERAGE WIN HOLD TIME (MINUTES)")).toBeInTheDocument();
+    expect(screen.getByLabelText("AFTER A LOSS")).toBeInTheDocument();
+    expect(screen.getByLabelText("CONSECUTIVE LOSSES BEFORE REVIEW")).toBeInTheDocument();
+  });
+
   it("renders a guided 404 surface for unknown routes", () => {
     render(
       <MemoryRouter initialEntries={["/ghost-route"]}>

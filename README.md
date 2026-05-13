@@ -35,7 +35,7 @@ SentinelBrain combines:
 - **Isolation Forest anomaly detection** for unsupervised behavioral outlier detection.
 - **Random Forest risk classification** for supervised risk scoring when labels exist.
 - **Dynamic Z-score baselining** so a 0.01-lot trader and a 100-lot trader are judged relative to their own normal behavior.
-- **Cold-start Risk DNA scoring** for new users without trade history.
+- **Risk DNA onboarding** that captures trade frequency, standard unit size, hold time, loss response, and drawdown tolerance before the first live decision.
 - **Maturity tiers** from bootstrap to shadow mode to active personalized scoring.
 - **SHAP background explanations** for auditability and operator review.
 
@@ -65,6 +65,18 @@ Sentinel treats behavioral telemetry as the company's core dataset.
 
 This keeps the production database responsive while preserving a structured behavioral data lake.
 
+## Risk DNA Onboarding
+
+Sentinel now primes the Hybrid Brain before a trader reaches the 20-trade shadow threshold. The onboarding survey captures five cold-start anchors:
+
+- Typical round-trip trades per day for style-regime separation.
+- Standard unit lot size for a `$100k` equivalent position.
+- Average winning-trade hold time in minutes.
+- Loss response profile: wait for setup, mixed, or immediate re-entry.
+- Consecutive-loss threshold before the trader questions the strategy.
+
+When MT5 history is available, the backend fits the Isolation Forest and classifier using both the historical trades and synthetic Risk DNA priors. With Risk DNA plus 10 usable historical trades, the account can graduate directly to `maturity_2` active personalized scoring instead of waiting for trade 21.
+
 ## Scale Path
 
 The architecture is designed to grow from Vanguard beta users to a 10,000-account fleet:
@@ -88,7 +100,7 @@ Terraform validates locally, but production rollout still requires a real AWS `t
 |---|---|---|
 | `maturity_0` | No usable history | Bootstrap scoring from Risk DNA |
 | `maturity_1` | Early history | Shadow-mode observation |
-| `maturity_2` | 20+ trades and model ready | Personalized Isolation Forest + classifier scoring |
+| `maturity_2` | Risk DNA plus 10+ history trades, or mature model ready | Personalized Isolation Forest + classifier scoring |
 
 Live behavioral logs trigger background retraining every 20 trades. Redis retraining locks prevent duplicate training jobs for the same user.
 

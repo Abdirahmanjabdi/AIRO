@@ -9,6 +9,7 @@ export type OnboardingState =
 export type RiskMode = "normal" | "risk_off" | "baseline_pending" | "shadow" | "bootstrap";
 export type UserMaturity = "maturity_0" | "maturity_1" | "maturity_2";
 export type TradingStyle = "scalper" | "intraday" | "swing";
+export type TiltResponse = "wait_for_setup" | "mixed" | "immediate_reentry";
 
 export interface FeatureContribution {
   feature: string;
@@ -48,7 +49,11 @@ export interface UserInitialParameters {
   max_drawdown_pct: number;
   primary_instrument: string;
   trading_style: TradingStyle;
+  typical_daily_trades: number;
   typical_lot_size: number;
+  average_win_hold_minutes: number;
+  tilt_response: TiltResponse;
+  loss_review_threshold: number;
   max_lot_multiplier: number;
 }
 

@@ -18,7 +18,7 @@ import SectionHeader from "@/components/SectionHeader";
 import SurfacePanel from "@/components/SurfacePanel";
 import { toast } from "@/components/ui/sonner";
 import type { SentinelIdentity } from "@/hooks/useSentinelIdentity";
-import { sentinelApi, type OnboardingState, getExecutionMode } from "@/lib/api";
+import { sentinelApi, type OnboardingState, type TiltResponse, getExecutionMode } from "@/lib/api";
 
 type Stage = "IDLE" | "VAULT" | "PROVISIONING" | "SYNC" | "AUDIT" | "LIVE";
 
@@ -132,7 +132,11 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
   const [maxDrawdownPct, setMaxDrawdownPct] = useState(3);
   const [primaryInstrument, setPrimaryInstrument] = useState("NAS100");
   const [tradingStyle, setTradingStyle] = useState<"scalper" | "intraday" | "swing">("intraday");
+  const [typicalDailyTrades, setTypicalDailyTrades] = useState(8);
   const [typicalLotSize, setTypicalLotSize] = useState(1);
+  const [averageWinHoldMinutes, setAverageWinHoldMinutes] = useState(60);
+  const [tiltResponse, setTiltResponse] = useState<TiltResponse>("wait_for_setup");
+  const [lossReviewThreshold, setLossReviewThreshold] = useState(3);
   const [maxLotMultiplier, setMaxLotMultiplier] = useState(2);
   const [stage, setStage] = useState<Stage>("IDLE");
   const [jobId, setJobId] = useState<string | null>(null);
@@ -232,7 +236,11 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
           max_drawdown_pct: maxDrawdownPct,
           primary_instrument: primaryInstrument,
           trading_style: tradingStyle,
+          typical_daily_trades: typicalDailyTrades,
           typical_lot_size: typicalLotSize,
+          average_win_hold_minutes: averageWinHoldMinutes,
+          tilt_response: tiltResponse,
+          loss_review_threshold: lossReviewThreshold,
           max_lot_multiplier: maxLotMultiplier,
         },
       });
@@ -371,7 +379,7 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
           <MetricCard
             label="History target"
             value={`${minTrades} trades`}
-            description="Minimum broker history required before the baseline graduates from onboarding."
+            description="Risk DNA can graduate the model from 10 broker trades when history is available."
             accent="primary"
             icon={<Radar size={18} />}
             valueClassName="text-xl text-primary"
@@ -651,10 +659,48 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
 
                   <div>
                     <label
+                      htmlFor="risk-dna-daily-trades"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      TYPICAL ROUND-TRIP TRADES PER DAY
+                    </label>
+                    <input
+                      id="risk-dna-daily-trades"
+                      type="number"
+                      min="1"
+                      max="500"
+                      step="1"
+                      value={String(typicalDailyTrades)}
+                      onChange={(event) => setTypicalDailyTrades(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-lot"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      STANDARD UNIT LOT SIZE FOR $100K
+                    </label>
+                    <input
+                      id="risk-dna-lot"
+                      type="number"
+                      min="0.01"
+                      max="500"
+                      step="0.01"
+                      value={String(typicalLotSize)}
+                      onChange={(event) => setTypicalLotSize(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label
                       htmlFor="risk-dna-style"
                       className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
                     >
-                      TRADING STYLE
+                      STYLE REGIME
                     </label>
                     <select
                       id="risk-dna-style"
@@ -670,19 +716,57 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
 
                   <div>
                     <label
-                      htmlFor="risk-dna-lot"
+                      htmlFor="risk-dna-hold-time"
                       className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
                     >
-                      TYPICAL LOT SIZE
+                      AVERAGE WIN HOLD TIME (MINUTES)
                     </label>
                     <input
-                      id="risk-dna-lot"
+                      id="risk-dna-hold-time"
                       type="number"
-                      min="0.01"
-                      max="500"
-                      step="0.01"
-                      value={String(typicalLotSize)}
-                      onChange={(event) => setTypicalLotSize(Number(event.target.value))}
+                      min="1"
+                      max="10080"
+                      step="1"
+                      value={String(averageWinHoldMinutes)}
+                      onChange={(event) => setAverageWinHoldMinutes(Number(event.target.value))}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-tilt"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      AFTER A LOSS
+                    </label>
+                    <select
+                      id="risk-dna-tilt"
+                      value={tiltResponse}
+                      onChange={(event) => setTiltResponse(event.target.value as TiltResponse)}
+                      className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                    >
+                      <option value="wait_for_setup">Wait for the next setup</option>
+                      <option value="mixed">Depends on market structure</option>
+                      <option value="immediate_reentry">Often look for immediate re-entry</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="risk-dna-losses"
+                      className="mb-1.5 block text-[10px] tracking-[0.15em] text-muted-foreground"
+                    >
+                      CONSECUTIVE LOSSES BEFORE REVIEW
+                    </label>
+                    <input
+                      id="risk-dna-losses"
+                      type="number"
+                      min="1"
+                      max="20"
+                      step="1"
+                      value={String(lossReviewThreshold)}
+                      onChange={(event) => setLossReviewThreshold(Number(event.target.value))}
                       className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
                     />
                   </div>
@@ -735,7 +819,10 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
                       !readOnlyPassword.trim() ||
                       !primaryInstrument.trim() ||
                       maxDrawdownPct <= 0 ||
-                      typicalLotSize <= 0
+                      typicalDailyTrades <= 0 ||
+                      typicalLotSize <= 0 ||
+                      averageWinHoldMinutes <= 0 ||
+                      lossReviewThreshold <= 0
                     }
                     className="inline-flex items-center justify-center gap-2 border border-primary/40 bg-primary/10 px-5 py-3 text-[11px] font-bold tracking-[0.18em] text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >

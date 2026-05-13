@@ -22,7 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.api.dependencies import cache_user_brain, get_user_brain
-from sentinel.brain.feature_engine import engineer_features
+from sentinel.brain.feature_engine import FEATURE_COLUMNS_V2, engineer_features
 from sentinel.brain.risk_engine import SentinelBrain
 from sentinel.domain.models import (
     AdminOverview,
@@ -187,6 +187,71 @@ def _behavioral_logs_to_training_frame(logs: list[object]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _risk_dna_minimum_history(job_min_trades: int) -> int:
+    """Risk DNA allows activation from 10 history trades instead of a hard 20."""
+    _ = job_min_trades
+    return 10
+
+
+def _seed_feature_frame_with_risk_dna(
+    feature_frame: pd.DataFrame,
+    initial_parameters: UserInitialParameters,
+) -> pd.DataFrame:
+    """
+    Prime the cold-start model with survey priors before fitting.
+
+    IsolationForest has no partial_fit API, so we add a small set of synthetic
+    safe/risk anchors and run a normal fit with the user's MT5 history.
+    """
+    lot_mean = initial_parameters.typical_lot_size
+    lot_sigma = max(lot_mean * 0.25, 0.01)
+    hard_lot_limit = lot_mean * initial_parameters.max_lot_multiplier
+    drawdown_limit = initial_parameters.max_drawdown_pct / 100.0
+    loss_threshold = initial_parameters.loss_review_threshold
+    revenge_threshold = {
+        "scalper": 3.0,
+        "intraday": 10.0,
+        "swing": 60.0,
+    }[initial_parameters.trading_style.value]
+
+    safe_anchor = {
+        "Hour_Decimal": 10.0,
+        "Losing_Streak": 0,
+        "Drawdown_State": drawdown_limit * 0.25,
+        "Lot_Deviation": 0.0,
+        "Revenge_Timer": max(revenge_threshold * 3.0, initial_parameters.average_win_hold_minutes),
+        "Lots": lot_mean,
+        "RR Ratio": 2.0,
+        "Realized_Vol_20": 0.0,
+        "Trend_Momentum": 0.0,
+        "Is_High_Risk": 0,
+    }
+    style_anchor = {
+        **safe_anchor,
+        "Hour_Decimal": 14.0,
+        "Losing_Streak": max(loss_threshold - 1, 0),
+        "Lot_Deviation": 1.0,
+        "Revenge_Timer": max(revenge_threshold * 1.5, 5.0),
+        "Lots": max(lot_mean + lot_sigma, 0.01),
+    }
+    risk_anchor = {
+        **safe_anchor,
+        "Losing_Streak": loss_threshold + 1,
+        "Drawdown_State": drawdown_limit * 1.2,
+        "Lot_Deviation": 3.25,
+        "Revenge_Timer": max(min(revenge_threshold * 0.25, 5.0), 0.5),
+        "Lots": max(hard_lot_limit * 1.1, lot_mean + (3.25 * lot_sigma)),
+        "RR Ratio": 0.5,
+        "Is_High_Risk": 1,
+    }
+
+    priors = pd.DataFrame([safe_anchor, style_anchor, risk_anchor])
+    for column in FEATURE_COLUMNS_V2 + ["Is_High_Risk"]:
+        if column not in feature_frame.columns:
+            feature_frame[column] = 0.0
+    return pd.concat([feature_frame, priors], ignore_index=True)
+
+
 async def _retrain_user_model_from_behavioral_logs(user_id: str) -> None:
     if not await cache_manager.acquire_retraining_lock(user_id):
         logger.info("Retraining already active for %s; skipping duplicate trigger.", user_id)
@@ -227,7 +292,7 @@ async def _retrain_user_model_from_behavioral_logs(user_id: str) -> None:
 
 
 def _maturity_for_trade_count(trade_count: int, baseline_ready: bool) -> UserMaturity:
-    if baseline_ready and trade_count >= 20:
+    if baseline_ready:
         return UserMaturity.MATURITY_2
     if trade_count > 0:
         return UserMaturity.MATURITY_1
@@ -300,6 +365,11 @@ async def _train_and_persist_user_model(
 
             raw_frame = _trades_to_frame(submission.trades)
             feature_frame = await asyncio.to_thread(engineer_features, raw_frame)
+            user = await get_user(session, submission.user_id)
+            initial_parameters = UserInitialParameters.model_validate(
+                getattr(user, "initial_parameters", None) or {}
+            )
+            feature_frame = _seed_feature_frame_with_risk_dna(feature_frame, initial_parameters)
             brain = SentinelBrain()
             await asyncio.to_thread(brain.train, feature_frame)
 
@@ -311,24 +381,33 @@ async def _train_and_persist_user_model(
             model_path.unlink(missing_ok=True)
 
             trade_count = len(submission.trades)
+            required_trade_count = _risk_dna_minimum_history(int(job.min_trades))
+            baseline_ready = trade_count >= required_trade_count
             trained_at = datetime.now(timezone.utc)
             await upsert_user(
                 session,
                 submission.user_id,
                 model_s3_key=model_key,
                 trade_count=trade_count,
-                is_baseline_ready=trade_count >= max(20, job.min_trades),
+                is_baseline_ready=baseline_ready,
                 trained_at=trained_at,
                 maturity_state=_maturity_for_trade_count(
                     trade_count,
-                    trade_count >= max(20, job.min_trades),
+                    baseline_ready,
                 ).value,
             )
             await update_onboarding_job(
                 session,
                 submission.job_id,
                 state=OnboardingState.READY.value,
-                message="Baseline ready. Personalized model persisted.",
+                message=(
+                    "Risk DNA baseline ready. Personalized model persisted."
+                    if baseline_ready
+                    else (
+                        "Partial Risk DNA baseline persisted. Sentinel will shadow-watch "
+                        f"until {required_trade_count} trades are available."
+                    )
+                ),
                 trade_count=trade_count,
                 model_s3_key=model_key,
                 completed_at=trained_at,
@@ -478,13 +557,18 @@ async def analyze_trade(
         if user is not None
         else UserBaseline(user_id=context.user_id, trade_count=0, is_baseline_ready=False)
     )
+    initial_profile = profile.initial_parameters
     try:
         await cache_manager.cache_behavioral_profile(
             context.user_id,
             {
                 **profile.model_dump(mode="json"),
-                "avg_lots": context.lots,
-                "std_lots": max(context.lots * 0.25, 0.01),
+                "avg_lots": initial_profile.typical_lot_size,
+                "std_lots": max(initial_profile.typical_lot_size * 0.25, 0.01),
+                "typical_daily_trades": initial_profile.typical_daily_trades,
+                "average_win_hold_minutes": initial_profile.average_win_hold_minutes,
+                "tilt_response": initial_profile.tilt_response.value,
+                "loss_review_threshold": initial_profile.loss_review_threshold,
             },
         )
     except Exception:
@@ -592,6 +676,10 @@ async def analyze_trade(
                     "maturity_state": next_maturity.value,
                     "avg_lots": round(float(lot_values.mean()), 6),
                     "std_lots": round(max(float(lot_values.std(ddof=0) or 0.0), 0.01), 6),
+                    "typical_daily_trades": initial_profile.typical_daily_trades,
+                    "average_win_hold_minutes": initial_profile.average_win_hold_minutes,
+                    "tilt_response": initial_profile.tilt_response.value,
+                    "loss_review_threshold": initial_profile.loss_review_threshold,
                     "last_trade_count": next_trade_count,
                 },
             )

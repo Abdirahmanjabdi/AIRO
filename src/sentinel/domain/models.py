@@ -60,13 +60,25 @@ class TradingStyle(str, Enum):
     SWING = "swing"
 
 
+class TiltResponse(str, Enum):
+    """Self-declared behavior after a loss."""
+
+    WAIT_FOR_SETUP = "wait_for_setup"
+    MIXED = "mixed"
+    IMMEDIATE_REENTRY = "immediate_reentry"
+
+
 class UserInitialParameters(BaseModel):
     """Risk DNA survey values used before enough trade history exists."""
 
     max_drawdown_pct: float = Field(default=3.0, ge=0.1, le=25.0)
     primary_instrument: str = Field(default="FX", min_length=1, max_length=32)
     trading_style: TradingStyle = Field(default=TradingStyle.INTRADAY)
+    typical_daily_trades: int = Field(default=8, ge=1, le=500)
     typical_lot_size: float = Field(default=1.0, gt=0.0, le=500.0)
+    average_win_hold_minutes: float = Field(default=60.0, gt=0.0, le=10080.0)
+    tilt_response: TiltResponse = Field(default=TiltResponse.WAIT_FOR_SETUP)
+    loss_review_threshold: int = Field(default=3, ge=1, le=20)
     max_lot_multiplier: float = Field(default=2.0, ge=1.0, le=10.0)
 
     @field_validator("primary_instrument")
@@ -142,9 +154,9 @@ class UserBaseline(BaseModel):
     def validate_baseline(cls, value: bool, info: object) -> bool:
         data = getattr(info, "data", {})
         trade_count = data.get("trade_count", 0)
-        if value and trade_count < 20:
+        if value and trade_count < 1:
             raise ValueError(
-                f"Cannot be baseline_ready with only {trade_count} trades (min 20)"
+                f"Cannot be baseline_ready with only {trade_count} trades"
             )
         return value
 
