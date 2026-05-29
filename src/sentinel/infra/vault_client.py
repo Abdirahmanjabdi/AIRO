@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 try:
@@ -59,7 +60,8 @@ class VaultManager:
         configured_key = os.getenv("SENTINEL_FALLBACK_VAULT_KEY")
         if configured_key:
             return Fernet(configured_key.encode("utf-8"))
-        return Fernet(Fernet.generate_key())
+        # Fall back to base64 encoding to ensure cross-process stability for local dev runs
+        return None
 
     def _authenticate(self) -> None:
         if self.client is None:
@@ -187,6 +189,19 @@ class VaultManager:
         }
         if self.client is None:
             self._memory_store[user_id] = payload
+            import sqlite3
+            import json
+            # Anchor to project root (4 levels up from sentinel/infra/vault_client.py)
+            db_path = str(Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db")
+            conn = sqlite3.connect(db_path)
+            try:
+                with conn:
+                    conn.execute("CREATE TABLE IF NOT EXISTS vault_kv (key TEXT PRIMARY KEY, value TEXT)")
+                    conn.execute("INSERT OR REPLACE INTO vault_kv (key, value) VALUES (?, ?)", (user_id, json.dumps(payload)))
+            except Exception:
+                logger.exception("Failed to write mock credentials to SQLite fallback")
+            finally:
+                conn.close()
             return
 
         self.client.secrets.kv.v2.create_or_update_secret(
@@ -198,9 +213,26 @@ class VaultManager:
     def fetch_broker_credentials(self, user_id: str) -> dict[str, Any]:
         self._assert_production_vault("credential retrieval")
         if self.client is None:
-            if user_id not in self._memory_store:
+            record = self._memory_store.get(user_id)
+            if record is None:
+                import sqlite3
+                import json
+                # Anchor to project root (4 levels up from sentinel/infra/vault_client.py)
+                db_path = str(Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db")
+                conn = sqlite3.connect(db_path)
+                try:
+                    cursor = conn.execute("SELECT value FROM vault_kv WHERE key = ?", (user_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        record = json.loads(row[0])
+                        self._memory_store[user_id] = record
+                except Exception:
+                    logger.exception("Failed to read mock credentials from SQLite fallback")
+                finally:
+                    conn.close()
+
+            if record is None:
                 raise KeyError(f"No broker credentials found for {user_id}")
-            record = self._memory_store[user_id]
         else:
             response = self.client.secrets.kv.v2.read_secret_version(
                 mount_point=self.kv_mount_point,

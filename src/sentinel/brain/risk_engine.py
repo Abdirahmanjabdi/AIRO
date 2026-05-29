@@ -30,6 +30,12 @@ import pandas as pd
 import shap
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 
+try:
+    import mlflow
+    import mlflow.sklearn
+except ImportError:
+    mlflow = None
+
 from sentinel.domain.models import (
     Decision,
     FeatureContribution,
@@ -42,6 +48,21 @@ from sentinel.domain.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_progression_level(trade_count: int) -> int:
+    """10-Level progression map based on collected behavioral logs."""
+    if trade_count < 20: return 1
+    elif trade_count < 50: return 2
+    elif trade_count < 100: return 3
+    elif trade_count < 150: return 4
+    elif trade_count < 200: return 5
+    elif trade_count < 300: return 6
+    elif trade_count < 400: return 7
+    elif trade_count < 600: return 8
+    elif trade_count < 1000: return 9
+    return 10  # God Mode (1000+ trades)
+
 
 
 # =============================================================================
@@ -153,6 +174,96 @@ class SentinelBrain:
         self._is_trained = True
         logger.info("SentinelBrain training complete.")
 
+    def train_with_rlhf(
+        self,
+        df: pd.DataFrame,
+        user_id: str,
+        feedback_labels: list[str | None] | None = None,
+    ) -> None:
+        """
+        Train both models with dynamic sample weighting based on RLHF.
+        Log parameters, metrics, and model artifact locally to local SQLite MLflow tracking server.
+        """
+        X: pd.DataFrame = df[self._feature_columns].fillna(0)
+        y: pd.Series = df["Is_High_Risk"]
+        if y.nunique() < 2:
+            synthetic = X.iloc[[0]].copy()
+            synthetic["Losing_Streak"] = 5.0
+            synthetic["Drawdown_State"] = max(float(X["Drawdown_State"].max()), 0.05)
+            synthetic["Lot_Deviation"] = max(float(X["Lot_Deviation"].max()), 3.0)
+            synthetic["Revenge_Timer"] = min(float(X["Revenge_Timer"].min()), 1.0)
+            X = pd.concat([X, synthetic], ignore_index=True)
+            y = pd.concat([y, pd.Series([1 - int(y.iloc[0])])], ignore_index=True)
+            if feedback_labels is not None:
+                feedback_labels = feedback_labels + [None]
+
+        logger.info("Training SentinelBrain with RLHF for user %s on %d trades...", user_id, len(df))
+
+        # Train Watchdog (unsupervised)
+        self.iso_forest.fit(X)
+
+        # Standard weight is 1.0. False Positive samples get slammed down to 0.05.
+        sample_weights = []
+        if feedback_labels is not None:
+            # Pad or slice feedback labels to match the size of X
+            padded_labels = list(feedback_labels)
+            while len(padded_labels) < len(X):
+                padded_labels.append(None)
+            for label in padded_labels[:len(X)]:
+                if label == "FALSE_POSITIVE":
+                    sample_weights.append(0.05)  # Penalize that feature subspace
+                else:
+                    sample_weights.append(1.0)
+        else:
+            sample_weights = [1.0] * len(X)
+
+        # Train Analyst with sample weights (supervised)
+        self.classifier.fit(X, y, sample_weight=sample_weights)
+
+        # Setup explainers
+        self._explainer = shap.TreeExplainer(self.classifier)
+        self._is_trained = True
+
+        # Log parameters and model via MLflow if available
+        if mlflow is not None:
+            try:
+                mlflow.set_tracking_uri("sqlite:///mlflow.db")
+                mlflow.set_experiment(f"Experiment_{user_id}")
+                with mlflow.start_run(run_name="level_progression_retrain") as active_run:
+                    mlflow.log_param("risk_threshold", self.risk_threshold)
+                    mlflow.log_param("n_estimators", self.classifier.n_estimators)
+                    mlflow.log_metric("dataset_size", len(df))
+                    mlflow.sklearn.log_model(self.classifier, "model")
+                    
+                    # Log feed score metrics
+                    fp_count = sample_weights.count(0.05)
+                    tp_count = len(sample_weights) - fp_count
+                    feed_score = tp_count / len(sample_weights) if sample_weights else 1.0
+                    mlflow.log_metric("user_feedback_score", feed_score)
+
+                    # Register and transition model stage
+                    model_uri = f"runs:/{active_run.info.run_id}/model"
+                    model_name = f"Model_{user_id}"
+                    model_version = mlflow.register_model(model_uri, model_name)
+                    
+                    client = mlflow.tracking.MlflowClient()
+                    client.transition_model_version_stage(
+                        name=model_name,
+                        version=model_version.version,
+                        stage="Production",
+                        archive_existing_versions=True
+                    )
+                    client.set_model_version_tag(
+                        name=model_name,
+                        version=model_version.version,
+                        key="model_level",
+                        value=str(get_progression_level(len(df)))
+                    )
+            except Exception as e:
+                logger.warning("MLflow logging/registration failed: %s", e)
+
+        logger.info("SentinelBrain training complete for %s.", user_id)
+
     # =========================================================================
     # PREDICTION (with circuit breaker)
     # =========================================================================
@@ -211,41 +322,51 @@ class SentinelBrain:
         """
         Cold-start scoring for users without a mature personalized model.
 
-        MATURITY_0 uses the self-declared Risk DNA limits.
-        MATURITY_1 watches relative deviations in shadow mode and never blocks.
+        Governed by a hardcoded 'Rule-Based Risk DNA Layer':
+        - Max daily drawdown = 4%
+        - Max lot deviation = 1.5x typical lot size
         """
         start_time = time.perf_counter()
-        risk_score, explanation = self._bootstrap_signals(context, initial_parameters)
+        signals: list[FeatureContribution] = []
+        decision = Decision.ALLOW
+        size_multiplier = 1.0
+        risk_score = 0.15
 
-        if maturity_state == UserMaturity.MATURITY_1:
-            return RiskAssessment(
-                decision=Decision.ALLOW,
-                risk_score=risk_score,
-                is_anomaly=risk_score >= 0.85,
-                size_multiplier=1.0,
-                explanation=explanation,
-                latency_ms=_elapsed_ms(start_time),
-                mode=RiskMode.SHADOW,
-                maturity_state=maturity_state,
-                shadow_mode=True,
-            )
-
-        if risk_score >= 0.9:
+        # 1. Daily drawdown rule (4% cap)
+        if context.drawdown_state > 0.04:
             decision = Decision.BLOCK
             size_multiplier = 0.0
-        elif risk_score >= 0.65:
-            decision = Decision.REDUCE_SIZE
-            size_multiplier = max(0.1, 1.0 - (risk_score * self.gentle_slope))
-        else:
-            decision = Decision.ALLOW
-            size_multiplier = 1.0
+            risk_score = 0.95
+            signals.append(FeatureContribution(feature="drawdown_state", impact=0.95))
+            logger.info("Rule-Based Risk DNA Block: drawdown_state %.4f exceeds 4%% cap", context.drawdown_state)
+
+        # 2. Lot deviation rule (1.5x cap)
+        typical = max(initial_parameters.typical_lot_size, 0.01)
+        max_allowed_lots = typical * 1.5
+        if context.lots > max_allowed_lots:
+            risk_score = max(risk_score, 0.85)
+            signals.append(FeatureContribution(feature="lot_deviation", impact=0.85))
+            
+            if context.lots > typical * 2.0:
+                decision = Decision.BLOCK
+                size_multiplier = 0.0
+                risk_score = 0.95
+                logger.info("Rule-Based Risk DNA Block: lots %.2f exceeds 2.0x baseline %.2f", context.lots, typical)
+            else:
+                if decision != Decision.BLOCK:
+                    decision = Decision.REDUCE_SIZE
+                    size_multiplier = max_allowed_lots / context.lots
+                logger.info("Rule-Based Risk DNA Size Reduction: lots %.2f exceeds 1.5x baseline %.2f", context.lots, typical)
+
+        if not signals:
+            signals.append(FeatureContribution(feature="steady_baseline", impact=0.15))
 
         return RiskAssessment(
             decision=decision,
             risk_score=risk_score,
-            is_anomaly=risk_score >= 0.85,
+            is_anomaly=decision == Decision.BLOCK,
             size_multiplier=round(size_multiplier, 4),
-            explanation=explanation,
+            explanation=signals,
             latency_ms=_elapsed_ms(start_time),
             mode=RiskMode.BOOTSTRAP,
             maturity_state=maturity_state,

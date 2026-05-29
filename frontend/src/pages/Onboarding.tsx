@@ -32,41 +32,41 @@ const STEPS: Array<{
 }> = [
   {
     key: "VAULT",
-    label: "VAULT",
-    description: "Encrypt broker credentials before they ever touch persistence.",
+    label: "CREDENTIAL SECURE",
+    description: "Encrypt broker credentials safely behind advanced security boundaries.",
     icon: LockKeyhole,
   },
   {
     key: "PROVISIONING",
-    label: "PROVISIONING",
-    description: "Queue the onboarding job and hand it to the MT5 bridge.",
+    label: "TELEMETRY LINK",
+    description: "Establish isolated telemetry link with the secure bridge environment.",
     icon: ServerCog,
   },
   {
     key: "SYNC",
-    label: "SYNCING HISTORY",
-    description: "Verify the broker session and pull the latest deal history.",
+    label: "HISTORY INDEXING",
+    description: "Index past MT5 history and verify initial safety parameters.",
     icon: Radar,
   },
   {
     key: "AUDIT",
-    label: "AUDITING",
-    description: "Train the personalized baseline and persist the model artifact.",
+    label: "CALIBRATION",
+    description: "Calibrate dynamic behavioral baseline and establish safety limits.",
     icon: Shield,
   },
 ];
 
 const STORAGE_FACTS = [
   {
-    title: "Vault transit",
+    title: "Encrypted Credentials Vault",
     detail: "Stores the read-only password path and encryption boundary.",
   },
   {
-    title: "Postgres",
+    title: "Securing Immutable Ledger",
     detail: "Keeps user metadata, onboarding jobs, and audit-ready state only.",
   },
   {
-    title: "S3 / MinIO",
+    title: "Encrypted Baseline Store",
     detail: "Receives the personalized model artifact after baseline training.",
   },
 ];
@@ -103,15 +103,15 @@ function stageTone(stage: Stage, hasError: boolean): {
 
   switch (stage) {
     case "LIVE":
-      return { accent: "secondary", label: "Live and monitoring" };
+      return { accent: "secondary", label: "System Governance Active" };
     case "VAULT":
-      return { accent: "primary", label: "Securing credentials" };
+      return { accent: "primary", label: "Securing Transit Boundary" };
     case "PROVISIONING":
-      return { accent: "primary", label: "Provisioning the bridge" };
+      return { accent: "primary", label: "Establishing Isolated Telemetry Link" };
     case "SYNC":
-      return { accent: "primary", label: "Syncing broker history" };
+      return { accent: "primary", label: "Synchronizing Historical Ledger" };
     case "AUDIT":
-      return { accent: "secondary", label: "Training the baseline" };
+      return { accent: "secondary", label: "Calibrating Behavioral Baseline" };
     default:
       return { accent: "neutral", label: "Waiting for initialization" };
   }
@@ -202,8 +202,8 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
       
       const mode = getExecutionMode();
       if (mode === "cloud") {
-        setStatusMessage("Provisioning Sentinel Bridge AWS Pod...");
-        appendLog("> Requesting AWS EKS Windows Node for bridge isolation...");
+        setStatusMessage("Establishing Isolated Telemetry Link...");
+        appendLog("> Directing bridge proxy to secure isolated instance...");
         
         const provisionResponse = await sentinelApi.provisionBridge(userId);
         appendLog(`> Provisioning bridge pod: ${provisionResponse.pod_id}`);
@@ -328,8 +328,8 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
       <Reveal>
         <SectionHeader
           eyebrow="Workspace / Onboarding"
-          title="Seal the MT5 bridge, train the baseline, and open the live lane."
-          description="This onboarding flow describes the actual control plane path: encrypt credentials in Vault, queue the MT5 bridge, verify broker history, and persist a personalized model artifact for the connected trader."
+          title="Establish Telemetry Link, calibrate baseline, and activate governance."
+          description="This onboarding flow describes the actual Qasali zero-trust link: encrypt credentials safely in the Credentials Vault, establish isolated telemetry links, index broker ledgers, and calibrate a private behavioral baseline."
           aside={(
             <SurfacePanel accent={tone.accent} className="p-5">
               <div className="flex items-start justify-between gap-3">
@@ -582,6 +582,9 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
                       className="h-11 w-full border border-border bg-background/70 px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
                       placeholder="Stored through Vault transit"
                     />
+                    <div className="mt-2 text-[10px] text-primary/80 border border-primary/20 bg-primary/5 p-2 font-sans leading-5">
+                      <strong>Sentinel Zero-Asset Protocol:</strong> Read-only credentials cannot execute withdrawals, asset transfers, or balance adjustments. Your capital remains completely locked within your broker environment.
+                    </div>
                   </div>
 
                   <div className="sm:col-span-2">
@@ -845,6 +848,10 @@ export default function Onboarding({ identity, onConnected }: OnboardingProps) {
                   >
                     RESET FORM
                   </button>
+                </div>
+                <div className="mt-8 border-t border-border/70 pt-6 text-[11px] leading-relaxed text-muted-foreground/60">
+                  <p className="font-bold uppercase tracking-wider text-muted-foreground/80 mb-2">Legal Disclaimer</p>
+                  "Sentinel Trading is a risk management software tool, not a financial advisor or brokerage. We do not guarantee profits or the prevention of all losses. You remain solely responsible for the capital in your trading accounts."
                 </div>
               </form>
             )}

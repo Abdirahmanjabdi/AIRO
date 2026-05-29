@@ -1,130 +1,130 @@
-export const PRODUCT_TAGLINE = "Identity-first trade protection for MT5 operators and funded-trader businesses.";
+export const PRODUCT_TAGLINE = "Automated account protection and tilt prevention for MT5 traders and prop firm businesses.";
 
 export const heroPillars = [
   {
-    eyebrow: "Identity-First Inference",
-    title: "Every trader gets a private behavioral baseline.",
+    eyebrow: "Personalized Risk Profiling",
+    title: "A safety guard tuned to your unique behavior.",
     description:
-      "Sentinel Zero trains and loads a dedicated model per trader, so the system reacts to their actual revenge-trading signature instead of a generic average.",
+      "Sentinel learns your trading patterns over time. Instead of generic rules, it understands your personal revenge-trading signals and drawdowns to protect you when it matters most.",
   },
   {
-    eyebrow: "Zero-Trust Security",
-    title: "Broker secrets move through Vault, not through your database.",
+    eyebrow: "Ultra-Secure Credentials",
+    title: "Your account details remain sealed and private.",
     description:
-      "Read-only MT5 credentials are sealed before persistence, then handed to the bridge only for the onboarding and telemetry flow that needs them.",
+      "Your read-only MT5 credentials are encrypted instantly before they are saved. They are only utilized to securely sync history and analyze live positions.",
   },
   {
-    eyebrow: "Elastic Control Plane",
-    title: "The platform watches latency, readiness, and fleet state in one place.",
+    eyebrow: "Real-Time Governance",
+    title: "Monitor risk, metrics, and safety checks in one place.",
     description:
-      "The same interface that onboards a trader also surfaces readiness, audits, model artifacts, and cluster-backed control-plane health.",
+      "View live risk analysis, average decision latency, historical safety interventions, and account status in a highly interactive operator dashboard.",
   },
 ];
 
 export const platformFacts = [
-  "FastAPI brain with personalized ML inference",
-  "AWS-ready EKS deployment with Redis, Postgres, Vault, and S3",
-  "MT5 relay bridge that stays dumb and passes telemetry upstream",
-  "Per-user audit trail for ROM, coaching, and compliance",
+  "Smart behavioral guard with customizable risk parameters",
+  "Zero-dependency local setup that works out-of-the-box",
+  "High-frequency MT5 relay bridge that streams live telemetry safely",
+  "Detailed historical audit logs for performance review and coaching",
 ];
 
 export const workflowSteps = [
   {
     id: "vault",
-    title: "Vault",
+    title: "Secure",
     description:
-      "The browser submits the read-only password through the credentials endpoint so the secret is sealed before the rest of onboarding begins.",
+      "Seal your read-only broker credentials safely behind advanced encryption before onboarding begins.",
   },
   {
     id: "provision",
-    title: "Provision",
+    title: "Register",
     description:
-      "The backend registers the user identity, persists the onboarding job, and dispatches the MT5 bridge work for that trader.",
+      "Register your trader identity and prepare the high-speed bridge connection for live tracking.",
   },
   {
     id: "history",
-    title: "History",
+    title: "Sync",
     description:
-      "The bridge verifies the broker session and pulls the latest MT5 deals so the feature engine has real trading behavior to learn from.",
+      "The bridge connects to your broker session to sync past history so our engine can map your safe boundaries.",
   },
   {
     id: "baseline",
-    title: "Baseline",
+    title: "Protect",
     description:
-      "The brain engineers features, trains the model, persists the artifact to S3 or MinIO, and exposes the baseline to live inference.",
+      "Sentinel establishes your behavioral guard, activates live decision analysis, and locks down your capital from tilt.",
   },
 ];
 
 export const productCapabilities = [
   {
-    title: "Behavioral anomaly detection",
+    title: "Behavioral tilt detection",
     description:
-      "Blend Isolation Forest and Random Forest outputs into a single risk decision that can allow, block, or reduce position size.",
+      "Combine live trade metrics to automatically block toxic sizing, revenge entry cascades, or excessive drawdown patterns.",
   },
   {
-    title: "Blank-baseline onboarding",
+    title: "New-account baseline safety",
     description:
-      "New accounts do not crash the workflow. If there is no broker history yet, Sentinel records a blank baseline and keeps the account ready for future retraining.",
+      "Fresh accounts simple connect instantly without waiting. Sentinel shadows your account and prepares your baseline automatically as you trade.",
   },
   {
-    title: "Decision audit stream",
+    title: "Clear decision history log",
     description:
-      "Every score is stored with latency, explanation features, mode, and cache metadata so the operator can prove what was prevented and why.",
+      "Every single risk assessment is permanently logged with clear, readable reason guides, sizing multipliers, and timestamp data.",
   },
   {
-    title: "Operator-grade runtime status",
+    title: "Dynamic visual risk charts",
     description:
-      "Redis, Postgres, model loading, and readiness are surfaced directly in the UI instead of hidden behind generic green-dot dashboards.",
+      "Track your active risk scans via live polar grids, multi-dimensional behavior DNA charts, and live risk-gauge visuals.",
   },
 ];
 
 export const faqs = [
   {
-    question: "What makes Sentinel Zero different from a generic risk bot?",
+    question: "What makes Sentinel different from a generic prop firm risk bot?",
     answer:
-      "Sentinel Zero does not score a trader against an average population. It trains a baseline tied to that trader's own MT5 history, then applies it during live inference so protection reflects their personal behavior.",
+      "Traditional risk systems use generic, hard-coded parameters. Sentinel trains a customized safety baseline based directly on your own trading history, responding uniquely to your personal behavioral patterns.",
   },
   {
-    question: "Do you store the trader's broker password in the database?",
+    question: "Is my broker password completely safe?",
     answer:
-      "No. The frontend sends the read-only password to the credentials endpoint, which is designed to move the secret into Vault-backed storage. Postgres stores metadata and job state, not plaintext credentials.",
+      "Yes. Sentinel uses read-only MT5 passwords to observe positions. Your password is securely encrypted instantly inside Vault-level credentials storage, keeping your actual account assets 100% private.",
   },
   {
-    question: "What happens if an account is brand new and has no MT5 history?",
+    question: "What happens if my MT5 account is brand new?",
     answer:
-      "The onboarding flow records a blank baseline instead of failing. That lets the trader connect immediately while the platform waits for enough history to retrain a personalized model.",
+      "No problem! Sentinel creates a blank baseline immediately. You can begin trading right away while the platform observes your execution and prepares a personalized risk profile once history accumulates.",
   },
   {
-    question: "Can the frontend run without Supabase?",
+    question: "Can I run this locally without complex cloud setup?",
     answer:
-      "Yes. The current product can run end to end against the FastAPI backend, Redis, Postgres, Vault, and S3. A dedicated auth platform like Supabase or Clerk can still be added later if you want richer customer identity and session management.",
+      "Yes. The entire codebase is fully optimized for local development and direct Windows desktop execution, with light local database fallbacks that require zero server clusters.",
   },
   {
-    question: "What does the admin plane show?",
+    question: "What does the protection command center display?",
     answer:
-      "The operator view aggregates users, onboarding jobs, recent decision state, and baseline readiness so the team can monitor rollout quality and operational health.",
+      "It displays live trader stats, active behavioral risk scans, automated sizing bounds, total capital protected, and real-time logs of every safety check.",
   },
   {
-    question: "How does Sentinel fit into a funded-trader or Whop workflow?",
+    question: "How does Sentinel handle high-risk situations like tilt?",
     answer:
-      "Whop can drive membership lifecycle events while Sentinel handles onboarding, model training, and decision monitoring. The frontend is built to present that as one continuous SaaS workflow.",
+      "If you trigger a critical drawdown or behavioral anomaly (like revenge-scaling), Sentinel instantly closes toxic trades on MT5 and activates a 15-minute lock to help you cool down and protect your capital.",
   },
 ];
 
 export const workspaceHighlights = [
   {
-    label: "Live decision budget",
-    value: "500 ms",
-    detail: "Target telemetry-to-decision loop for the protected path.",
+    label: "Live decision speed",
+    value: "Sub-50ms",
+    detail: "Ultra-fast response loop to intercept trades in real time.",
   },
   {
-    label: "Model storage",
-    value: "S3 / MinIO",
-    detail: "Per-user artifacts persisted for repeatable inference.",
+    label: "Capital safety",
+    value: "Tilt Prevention",
+    detail: "Guillotine closes and cooldown timers to secure prop firm funding.",
   },
   {
-    label: "Infra readiness",
-    value: "Redis + Postgres",
-    detail: "Runtime checks surfaced directly in the operator UI.",
+    label: "Infra telemetry",
+    value: "Always Available",
+    detail: "Live database, bridge, and connection health visible right on your screen.",
   },
 ];

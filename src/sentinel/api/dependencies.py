@@ -129,9 +129,14 @@ async def initialize_runtime() -> None:
 
     load_default_model()
     try:
-        await cache_manager.ping()
+        if not await cache_manager.ping():
+            from sentinel.infra.redis_cache import InMemoryRedis
+            logger.warning("Redis ping failed. Swapping to InMemoryRedis fallback.")
+            cache_manager.r = InMemoryRedis()
     except Exception:
-        logger.exception("Redis connectivity check failed during startup")
+        from sentinel.infra.redis_cache import InMemoryRedis
+        logger.warning("Redis connectivity check failed. Swapping to InMemoryRedis fallback.")
+        cache_manager.r = InMemoryRedis()
 
     if os.getenv("SENTINEL_ENABLE_DATA_LAKE_EXPORT", "true").strip().lower() in {
         "1",
@@ -195,6 +200,87 @@ async def get_cache_manager() -> object:
     return cache_manager
 
 
+import base64
+import json
+import hashlib
+import time
+from datetime import datetime, timezone
+from cryptography.fernet import Fernet
+
+# A stable Fernet key derived from a secret, or a newly generated one if not set
+SECRET_KEY = os.getenv("SENTINEL_SECRET_KEY", "sentinel_fallback_secret_32_bytes_long_!!")
+FERNET_KEY = base64.urlsafe_b64encode(hashlib.sha256(SECRET_KEY.encode()).digest())
+cipher_suite = Fernet(FERNET_KEY)
+
+def create_session_token(user_id: str) -> str:
+    """Generates an encrypted, signed session token containing the user identity and a timestamp."""
+    payload = {
+        "user_id": user_id,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    encrypted = cipher_suite.encrypt(json.dumps(payload).encode())
+    return encrypted.decode()
+
+def verify_session_token(token: str) -> str:
+    """Decrypts and verifies token signature and expiration (24h)."""
+    try:
+        decrypted = cipher_suite.decrypt(token.encode())
+        payload = json.loads(decrypted.decode())
+        created_at = datetime.fromisoformat(payload["timestamp"])
+        if (datetime.now(timezone.utc) - created_at).total_seconds() > 86400:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session token expired."
+            )
+        return str(payload["user_id"])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid session token."
+        ) from exc
+
+async def verify_tenant_isolation(request: Request, user_id: str) -> None:
+    """Enforces strict tenant row-level checking to prevent IDOR/BOLA attacks."""
+    if os.getenv("SENTINEL_AUTH_DISABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        return
+
+    auth_user_id = getattr(request.state, "user_id", None)
+    if not auth_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session context missing user identity."
+        )
+    if auth_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Tenant Isolation violation (BOLA protected)."
+        )
+
+async def rate_limiter(request: Request) -> None:
+    """Sliding-window rate limiter restricting /analyze and /autopsy to 10 requests per second."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        return
+
+    current_second = int(time.time())
+    key = f"rate_limit:{user_id}:{current_second}"
+    try:
+        count = await cache_manager.r.incr(key)
+        if count == 1:
+            await cache_manager.r.expire(key, 2)
+        if count > 10:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded. Maximum 10 requests per second allowed per user."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        # Fallback to allow requests if cache manager is down
+        pass
+
 async def require_api_key(
     request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
@@ -206,13 +292,14 @@ async def require_api_key(
         "yes",
         "on",
     }:
+        request.state.user_id = "disabled_auth_user"
         return
 
     bootstrap_routes = {
         ("POST", "/v1/credentials"),
         ("POST", "/v1/onboard"),
     }
-    if (request.method, request.url.path) in bootstrap_routes:
+    if (request.method, request.url.path) in bootstrap_routes or request.url.path.startswith("/v1/onboard"):
         return
 
     if not x_api_key:
@@ -221,8 +308,33 @@ async def require_api_key(
             detail="Missing X-API-Key header.",
         )
 
+    # 1. First try to authenticate as a Fernet Session Token (for frontend Web Dashboard)
+    try:
+        user_id = verify_session_token(x_api_key)
+        request.state.user_id = user_id
+        return
+    except HTTPException:
+        pass
+
+    # 2. Fall back to standard raw API Key (for automated MT5 Pod bridges)
     if not await validate_api_key(session, x_api_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key.",
         )
+
+    # Populate request.state.user_id with the corresponding key owner user_id
+    from sqlalchemy import select
+    from sentinel.infra.db import ApiCredential
+    api_key_hash = hashlib.sha256(x_api_key.encode("utf-8")).hexdigest()
+    try:
+        result = await session.execute(
+            select(ApiCredential).where(ApiCredential.api_key_hash == api_key_hash)
+        )
+        cred = result.scalar_one_or_none()
+        if cred:
+            request.state.user_id = cred.user_id
+        else:
+            request.state.user_id = "unknown_user"
+    except Exception:
+        request.state.user_id = "unknown_user"

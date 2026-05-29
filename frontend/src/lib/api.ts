@@ -89,6 +89,7 @@ export interface RiskAuditRecord {
   explanation: FeatureContribution[];
   latency_ms: number;
   cached: boolean;
+  autopsy_submitted: boolean;
   created_at: string;
 }
 
@@ -102,6 +103,10 @@ export interface WorkspaceSummary {
   average_latency_ms: number;
   protection_events: number;
   blank_baseline: boolean;
+  top_reason: string;
+  discipline_streak: number;
+  active_capital_at_risk: number;
+  circadian_risk_profile: Record<number, number>;
 }
 
 export interface AdminUserRecord {
@@ -195,7 +200,7 @@ export class ApiError extends Error {
 }
 
 export function getExecutionMode(): "local" | "cloud" {
-  return (localStorage.getItem("execution_mode") as "local" | "cloud") || "cloud";
+  return (localStorage.getItem("execution_mode") as "local" | "cloud") || "local";
 }
 
 export function setExecutionMode(mode: "local" | "cloud") {
@@ -387,5 +392,17 @@ export const sentinelApi = {
     }, 2500);
 
     return () => clearInterval(interval);
+  },
+
+  submitAutopsy(userId: string, auditId: number, feedbackLabel: "VALID_INTERCEPT" | "FALSE_POSITIVE", estimatedCapitalSaved = 0.0): Promise<any> {
+    return apiRequest(`/v1/user/${encodeURIComponent(userId)}/autopsy`, {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: userId,
+        audit_id: auditId,
+        feedback_label: feedbackLabel,
+        estimated_capital_saved: estimatedCapitalSaved,
+      }),
+    });
   }
 };

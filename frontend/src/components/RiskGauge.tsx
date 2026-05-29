@@ -32,7 +32,7 @@ export default function RiskGauge({ score, threshold }: Props) {
   const scoreSweep = Math.min(score, 1) * totalSweep;
   const thresholdAngle = startAngle - threshold * totalSweep;
   const isAlert = score > threshold;
-  const fillColor = isAlert ? '#E63946' : score > 0.4 ? '#F5A623' : '#4ECDC4';
+  const fillColor = isAlert ? '#C53030' : score > 0.4 ? '#CBA153' : '#D1D5DB';
 
   // Tick marks every 0.05 (20 ticks)
   const ticks = [];
@@ -46,7 +46,7 @@ export default function RiskGauge({ score, threshold }: Props) {
         key={`tick-${i}`}
         x1={inner.x} y1={inner.y}
         x2={outer.x} y2={outer.y}
-        stroke={isMajor ? 'hsl(220 8% 28%)' : 'hsl(220 8% 18%)'}
+        stroke={isMajor ? 'hsl(225 15% 24%)' : 'hsl(225 15% 14%)'}
         strokeWidth={isMajor ? 1.5 : 0.5}
       />
     );
@@ -59,9 +59,9 @@ export default function RiskGauge({ score, threshold }: Props) {
           x={label.x} y={label.y}
           textAnchor="middle"
           dominantBaseline="middle"
-          fill="hsl(220 8% 32%)"
+          fill="hsl(225 10% 48%)"
           fontSize="8"
-          fontFamily="Space Mono, monospace"
+          fontFamily="Fira Code, monospace"
         >
           {(i * 0.05).toFixed(2)}
         </text>
@@ -78,17 +78,17 @@ export default function RiskGauge({ score, threshold }: Props) {
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="select-none">
         <defs>
           <filter id={glowId}>
-            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feGaussianBlur stdDeviation="3" result="blur" />
             <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
           <linearGradient id={`${glowId}-ring`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#111827" />
-            <stop offset="100%" stopColor="#0b1220" />
+            <stop offset="0%" stopColor="#0E1424" />
+            <stop offset="100%" stopColor="#080B12" />
           </linearGradient>
         </defs>
 
         <circle cx={cx} cy={cy} r={innerR - 16} fill={`url(#${glowId}-ring)`} opacity={0.92} />
-        <circle cx={cx} cy={cy} r={innerR - 2} fill="none" stroke="rgba(255,255,255,0.05)" />
+        <circle cx={cx} cy={cy} r={innerR - 2} fill="none" stroke="rgba(255,255,255,0.03)" />
 
         {/* Outer ring ticks */}
         {ticks}
@@ -97,7 +97,7 @@ export default function RiskGauge({ score, threshold }: Props) {
         <path
           d={describeArc(arcR, startAngle, totalSweep)}
           fill="none"
-          stroke="hsl(224 14% 10%)"
+          stroke="hsl(225 25% 10%)"
           strokeWidth={8}
           strokeLinecap="round"
         />
@@ -111,14 +111,14 @@ export default function RiskGauge({ score, threshold }: Props) {
           strokeLinecap="round"
           filter={`url(#${glowId})`}
           className="transition-all duration-700 ease-out"
-          style={{ filter: `drop-shadow(0 0 6px ${fillColor}40)` }}
+          style={{ filter: `drop-shadow(0 0 4px ${fillColor}30)` }}
         />
 
         {/* Threshold line */}
         <line
           x1={threshP1.x} y1={threshP1.y}
           x2={threshP2.x} y2={threshP2.y}
-          stroke="#F5A623"
+          stroke="#CBA153"
           strokeWidth={2}
           strokeDasharray="3 2"
         />
@@ -130,9 +130,9 @@ export default function RiskGauge({ score, threshold }: Props) {
           dominantBaseline="middle"
           fill={fillColor}
           fontSize="56"
-          fontFamily="Space Mono, monospace"
+          fontFamily="Fira Code, monospace"
           fontWeight="bold"
-          style={{ filter: `drop-shadow(0 0 12px ${fillColor}30)` }}
+          style={{ filter: `drop-shadow(0 0 10px ${fillColor}20)` }}
         >
           {score.toFixed(2)}
         </text>
@@ -141,9 +141,9 @@ export default function RiskGauge({ score, threshold }: Props) {
         <text
           x={cx} y={cy + 28}
           textAnchor="middle"
-          fill="hsl(220 8% 32%)"
+          fill="hsl(225 10% 48%)"
           fontSize="10"
-          fontFamily="Space Mono, monospace"
+          fontFamily="Fira Code, monospace"
           letterSpacing="0.15em"
         >
           RISK INDEX
@@ -153,9 +153,9 @@ export default function RiskGauge({ score, threshold }: Props) {
         <text
           x={cx} y={cy + 48}
           textAnchor="middle"
-          fill="#F5A623"
+          fill="#CBA153"
           fontSize="9"
-          fontFamily="Space Mono, monospace"
+          fontFamily="Fira Code, monospace"
           letterSpacing="0.12em"
           opacity={0.8}
         >

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import time
 from pathlib import Path
 
@@ -47,6 +48,7 @@ class TradeTelemetry(BaseModel):
     rr_ratio: float
     realized_vol_20: float = 0.0
     trend_momentum: float = 0.0
+    position_id: int | None = None
 
 
 class BrainDecision(BaseModel):
@@ -74,12 +76,30 @@ class MT5BridgeRelay:
         self._monitor_user_id: str = os.getenv("SENTINEL_USER_ID", "")
         self._mt5_failure_count = 0
         self._fail_safe_threshold = 5
+        self._mt5_last_retry_ts: float = 0.0  # throttle re-init attempts
+        self._mt5_retry_interval: float = 30.0  # seconds between MT5 login attempts
 
     async def start(self) -> None:
         logger.info("Bridge relay starting. Brain API: %s", self.brain_url)
 
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            signal.signal(sig, self._shutdown_handler)
+        # Check Redis connection and swap to SQLite InMemoryRedis if down
+        try:
+            if not await cache_manager.ping():
+                from sentinel.infra.redis_cache import InMemoryRedis
+                logger.warning("Redis ping failed. Swapping to SQLite InMemoryRedis fallback.")
+                cache_manager.r = InMemoryRedis()
+        except Exception:
+            from sentinel.infra.redis_cache import InMemoryRedis
+            logger.warning("Redis connectivity check failed. Swapping to SQLite InMemoryRedis fallback.")
+            cache_manager.r = InMemoryRedis()
+
+        # Register shutdown signals — Windows only supports SIGINT; SIGTERM may be unavailable.
+        for sig in (signal.SIGINT, getattr(signal, "SIGTERM", None)):
+            if sig is not None:
+                try:
+                    signal.signal(sig, self._shutdown_handler)
+                except (OSError, ValueError):
+                    pass  # Not in main thread or unsupported signal on this OS
 
         # Try to initialize MT5 for live monitoring on startup
         await asyncio.to_thread(self._ensure_mt5_connected)
@@ -97,12 +117,17 @@ class MT5BridgeRelay:
                     await self._poll_and_relay()
                 except Exception as exc:
                     logger.error("Relay error: %s", exc, exc_info=True)
-                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+
+                # Active high-frequency polling budget of 50ms when Enforce mode is on
+                sleep_time = 0.05 if ENFORCE_MODE else POLL_INTERVAL_SECONDS
+                await asyncio.sleep(sleep_time)
 
         logger.info("Bridge relay stopped.")
 
     def _ensure_mt5_connected(self) -> None:
-        """Initialize MT5 using vault credentials for live position monitoring."""
+        """Initialize MT5 using vault credentials for live position monitoring in Portable Mode."""
         if self._mt5_ready:
             return
         if not self._monitor_user_id:
@@ -112,6 +137,8 @@ class MT5BridgeRelay:
             from sentinel.bridge.mt5_history import mt5 as mt5_module
             if mt5_module is None:
                 return
+
+            portable_path = f"C:\\Sentinel\\Users\\{self._monitor_user_id}\\terminal64.exe"
 
             # Check if already initialized
             info = mt5_module.terminal_info()
@@ -126,16 +153,32 @@ class MT5BridgeRelay:
             server = str(creds["server"])
             password = str(creds["password"])
 
-            initialized = mt5_module.initialize(login=login, server=server, password=password)
+            if os.path.exists(portable_path) and os.path.getsize(portable_path) > 1024 * 1024:
+                initialized = mt5_module.initialize(
+                    path=portable_path,
+                    login=login,
+                    server=server,
+                    password=password,
+                    portable=True
+                )
+            else:
+                logger.info("Isolated portable path not found or dummy mock. Initializing MT5 in standard mode.")
+                initialized = mt5_module.initialize(
+                    login=login,
+                    server=server,
+                    password=password
+                )
+
             if initialized:
                 self._mt5_ready = True
                 logger.info(
-                    "MT5 initialized for live monitoring: user=%s server=%s",
+                    "MT5 initialized: user=%s server=%s path=%s",
                     self._monitor_user_id,
                     server,
+                    portable_path if os.path.exists(portable_path) and os.path.getsize(portable_path) > 1024 * 1024 else "standard_path",
                 )
             else:
-                logger.warning("MT5 initialize failed for live monitoring: %s", mt5_module.last_error())
+                logger.warning("MT5 initialize failed: %s", mt5_module.last_error())
         except Exception as exc:
             logger.warning("Could not initialize MT5 for live monitoring: %s", exc)
 
@@ -151,15 +194,31 @@ class MT5BridgeRelay:
             return
 
         user_id = str(command["user_id"])
+        job_id = str(command["job_id"])
         await cache_manager.set_heartbeat(user_id)
-        logger.info("Processing onboarding job %s for user %s", command["job_id"], user_id)
-        await self._history_bridge.collect_and_submit(
-            job_id=str(command["job_id"]),
-            user_id=user_id,
-            broker_server=str(command["broker_server"]),
-            account_id=str(command["account_id"]),
-            limit=int(command.get("min_trades", 100)),
-        )
+        logger.info("Processing onboarding job %s for user %s", job_id, user_id)
+        try:
+            await self._history_bridge.collect_and_submit(
+                job_id=job_id,
+                user_id=user_id,
+                broker_server=str(command["broker_server"]),
+                account_id=str(command["account_id"]),
+                limit=int(command.get("min_trades", 100)),
+            )
+            logger.info("Onboarding job %s completed successfully for user %s", job_id, user_id)
+        except Exception as exc:
+            logger.error(
+                "Onboarding job %s FAILED for user %s: %s",
+                job_id, user_id, exc,
+                exc_info=True,
+            )
+            sys.stdout.flush()
+            sys.stderr.flush()
+        # Dynamically switch the live position monitoring to this user
+        self._monitor_user_id = user_id
+        self._mt5_ready = False
+        await asyncio.to_thread(self._ensure_mt5_connected)
+
 
     def _fail_safe_close_all(self, reason: str) -> None:
         if not ENFORCE_MODE:
@@ -252,8 +311,8 @@ class MT5BridgeRelay:
             "position": ticket,
             "price": price,
             "deviation": 20,
-            "magic": 760501,
-            "comment": "Sentinel Guardian intervention",
+            "magic": 999999,  # Hardcoded Guillotine Magic Number
+            "comment": "Sentinel Guillotine Triggered",
             "type_time": getattr(mt5_module, "ORDER_TIME_GTC"),
             "type_filling": getattr(mt5_module, "ORDER_FILLING_IOC"),
         }
@@ -332,9 +391,12 @@ class MT5BridgeRelay:
         Reads open MT5 positions directly every poll cycle and derives
         behavioural telemetry (drawdown, losing streak, revenge timer, lot deviation).
         """
-        # Re-attempt MT5 init if not ready
-        if not self._mt5_ready:
-            self._ensure_mt5_connected()
+        # Re-attempt MT5 init if not ready — throttled to once every 30s to avoid spamming the terminal
+        if not self._mt5_ready and self._monitor_user_id:
+            now = time.time()
+            if now - self._mt5_last_retry_ts >= self._mt5_retry_interval:
+                self._mt5_last_retry_ts = now
+                await asyncio.to_thread(self._ensure_mt5_connected)
 
         try:
             from sentinel.bridge.mt5_history import mt5 as mt5_module
@@ -431,6 +493,7 @@ class MT5BridgeRelay:
             rr_ratio=1.0,
             realized_vol_20=0.0,
             trend_momentum=0.0,
+            position_id=int(getattr(pos, "ticket", 0)),
         )
 
     def _terminal_disconnected(self, mt5_module: object) -> bool:
@@ -487,9 +550,18 @@ class MT5BridgeRelay:
 
 
 async def main() -> None:
+    # Use a handler that flushes after every record (critical for Windows log file visibility)
+    class FlushingStreamHandler(logging.StreamHandler):
+        def emit(self, record: logging.LogRecord) -> None:
+            super().emit(record)
+            self.flush()
+
+    handler = FlushingStreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[handler],
+        force=True,
     )
     relay = MT5BridgeRelay()
     await relay.start()

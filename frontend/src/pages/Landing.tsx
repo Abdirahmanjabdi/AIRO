@@ -76,16 +76,16 @@ export default function Landing() {
   const readinessRows = useMemo(
     () => [
       {
-        label: "Redis cache",
-        value: readinessQuery.data?.redis_connected ? "connected" : "watching",
+        label: "MT5 Bridge",
+        value: readinessQuery.data?.redis_connected ? "ACTIVE (Sub-50ms)" : "OFFLINE",
       },
       {
-        label: "Postgres",
-        value: readinessQuery.data?.db_connected ? "connected" : "checking",
+        label: "Audit Ledger",
+        value: readinessQuery.data?.db_connected ? "RECORDING" : "CHECKING",
       },
       {
-        label: "Model load",
-        value: readinessQuery.data?.model_loaded ? "ready" : "warming",
+        label: "Risk Model",
+        value: readinessQuery.data?.model_loaded ? "CALIBRATED (Tier 1)" : "CALIBRATING",
       },
     ],
     [readinessQuery.data],
@@ -127,28 +127,27 @@ export default function Landing() {
       </header>
 
       <main>
-        <section className="relative isolate overflow-hidden px-4 pb-12 pt-14 sm:px-6 lg:px-8 lg:pb-20 lg:pt-20">
-          <div className="absolute inset-x-0 top-[-180px] h-[420px] bg-[radial-gradient(circle_at_top,rgba(78,205,196,0.18),transparent_46%),radial-gradient(circle_at_80%_20%,rgba(245,166,35,0.16),transparent_34%)]" />
+        <section className="relative isolate overflow-hidden qasali-grid px-4 pb-12 pt-14 sm:px-6 lg:px-8 lg:pb-20 lg:pt-20">
+          <div className="absolute inset-x-0 top-[-180px] h-[420px] bg-[radial-gradient(circle_at_top,rgba(203,161,83,0.08),transparent_46%)]" />
           <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,1.15fr)_420px] lg:items-start">
             <div className="relative z-10">
-              <div className="inline-flex items-center gap-2 border border-secondary/25 bg-secondary/10 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-secondary">
+              <div className="inline-flex items-center gap-2 border border-primary/25 bg-primary/10 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-primary">
                 <Sparkles size={12} />
-                Production-grade risk control surface
+                Ethical Foundation of Capital Infrastructure
               </div>
 
-              <h1 className="mt-6 max-w-4xl font-display text-4xl font-bold leading-[0.95] text-foreground sm:text-5xl lg:text-7xl">
-                The command layer for traders you cannot afford to lose.
+              <h1 className="mt-6 max-w-4xl font-display text-4xl font-normal italic leading-[0.95] text-foreground sm:text-5xl lg:text-7xl">
+                The Algorithmic Hard-Stop.
               </h1>
               <p className="mt-6 max-w-3xl text-base leading-8 text-muted-foreground sm:text-lg">
-                {PRODUCT_TAGLINE} Sentinel Zero links the landing experience, onboarding,
-                personalized model lifecycle, and live operator workspace into one product surface.
+                Willpower is a failed metric in high-stakes environments. Sentinel is an event-driven risk gateway that physically locks your MT5 terminal when it detects emotional tilt. Radical objectivity. Sub-500ms precision.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Button
                   asChild
                   size="lg"
-                  className="border border-secondary/35 bg-secondary/10 text-secondary hover:bg-secondary/20"
+                  className="border border-primary/35 bg-primary/10 text-primary hover:bg-primary/20"
                 >
                   <Link to="/workspace/onboarding">
                     Connect an MT5 account
@@ -351,7 +350,7 @@ export default function Landing() {
         </section>
 
         <section className="px-4 pb-16 sm:px-6 lg:px-8 lg:pb-24">
-          <div className="mx-auto max-w-7xl border border-secondary/20 bg-[linear-gradient(135deg,rgba(78,205,196,0.14),rgba(10,13,20,0.65)_40%,rgba(245,166,35,0.12))] p-8 backdrop-blur-2xl sm:p-10">
+          <div className="mx-auto max-w-7xl border border-secondary/20 bg-[linear-gradient(135deg,rgba(203,161,83,0.08),rgba(10,15,26,0.85)_40%,rgba(203,161,83,0.03))] p-8 backdrop-blur-2xl sm:p-10">
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.18em] text-secondary">

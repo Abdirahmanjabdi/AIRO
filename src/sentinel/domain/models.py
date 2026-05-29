@@ -103,6 +103,7 @@ class TradeContext(BaseModel):
     rr_ratio: float = Field(..., gt=0.0)
     realized_vol_20: float = Field(default=0.0, ge=0.0)
     trend_momentum: float = Field(default=0.0, ge=0.0)
+    position_id: int | None = None
 
     @field_validator("hour_decimal")
     @classmethod
@@ -147,6 +148,7 @@ class UserBaseline(BaseModel):
     contamination: float = 0.0399
     maturity_state: UserMaturity = UserMaturity.MATURITY_0
     enforce_mode: bool = False
+    model_level: int = 1
     initial_parameters: UserInitialParameters = Field(default_factory=UserInitialParameters)
 
     @field_validator("is_baseline_ready")
@@ -238,6 +240,7 @@ class RiskAuditRecord(BaseModel):
     explanation: list[FeatureContribution] = Field(default_factory=list)
     latency_ms: float = Field(..., ge=0.0)
     cached: bool = False
+    autopsy_submitted: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -253,6 +256,10 @@ class WorkspaceSummary(BaseModel):
     average_latency_ms: float = Field(default=0.0, ge=0.0)
     protection_events: int = Field(default=0, ge=0)
     blank_baseline: bool = False
+    top_reason: str | None = None
+    discipline_streak: int = 0
+    active_capital_at_risk: float = 0.0
+    circadian_risk_profile: dict[int, float] = Field(default_factory=dict)
 
 
 class AdminUserRecord(BaseModel):
@@ -360,3 +367,11 @@ class AdminOverview(BaseModel):
     average_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     users: list[AdminUserRecord] = Field(default_factory=list)
     recent_jobs: list[OnboardingStatus] = Field(default_factory=list)
+
+
+class FeedbackSubmission(BaseModel):
+    """autopsy feedback submitted by the user after cooldown expires."""
+    user_id: str
+    audit_id: int
+    feedback_label: Literal["VALID_INTERCEPT", "FALSE_POSITIVE"]
+    estimated_capital_saved: float = 0.0

@@ -34,6 +34,12 @@ class User(Base):
     is_baseline_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     maturity_state: Mapped[str] = mapped_column(String(32), default="maturity_0")
     enforce_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # --- LEVEL PROGRESSION & GAMIFICATION ---
+    model_level: Mapped[int] = mapped_column(Integer, default=1)
+    feedback_score: Mapped[float] = mapped_column(Float, default=1.0)
+    capital_protected: Mapped[float] = mapped_column(Float, default=0.0)
+    
     initial_parameters: Mapped[dict[str, float | str]] = mapped_column(JSON, default=dict)
     trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -137,13 +143,28 @@ class BehavioralLog(Base):
     risk_score: Mapped[float] = mapped_column(Float)
     size_multiplier: Mapped[float] = mapped_column(Float)
     is_anomaly: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # --- RLHF HUMAN LABELS ---
+    user_feedback_label: Mapped[str | None] = mapped_column(String(32), nullable=True) # "VALID_INTERCEPT" or "FALSE_POSITIVE"
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
 
 
-engine = create_async_engine(DATABASE_URL, echo=False, future=True)
+engine_kwargs = {
+    "echo": False,
+    "future": True,
+}
+if "postgresql" in DATABASE_URL:
+    engine_kwargs.update({
+        "pool_size": 20,
+        "max_overflow": 30,
+        "pool_timeout": 30,
+        "pool_recycle": 1800,
+    })
+engine = create_async_engine(DATABASE_URL, **engine_kwargs)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 DB_AVAILABLE = True
 _memory_users: dict[str, User] = {}
@@ -169,6 +190,8 @@ async def init_db() -> None:
     global DB_AVAILABLE
     try:
         async with engine.begin() as connection:
+            if "sqlite" in DATABASE_URL:
+                await connection.execute(text("PRAGMA journal_mode=WAL;"))
             await connection.run_sync(Base.metadata.create_all)
             await connection.execute(
                 text("ALTER TABLE users ADD COLUMN IF NOT EXISTS maturity_state VARCHAR(32) DEFAULT 'maturity_0'")
@@ -178,6 +201,18 @@ async def init_db() -> None:
             )
             await connection.execute(
                 text("ALTER TABLE users ADD COLUMN IF NOT EXISTS initial_parameters JSON DEFAULT '{}'::json")
+            )
+            await connection.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS model_level INTEGER DEFAULT 1")
+            )
+            await connection.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS feedback_score DOUBLE PRECISION DEFAULT 1.0")
+            )
+            await connection.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS capital_protected DOUBLE PRECISION DEFAULT 0.0")
+            )
+            await connection.execute(
+                text("ALTER TABLE behavioral_logs ADD COLUMN IF NOT EXISTS user_feedback_label VARCHAR(32) DEFAULT NULL")
             )
             await connection.execute(
                 text("ALTER TABLE behavioral_logs DROP COLUMN IF EXISTS user_id")
@@ -230,6 +265,9 @@ async def upsert_user(
     maturity_state: str | None = None,
     enforce_mode: bool | None = None,
     initial_parameters: dict[str, float | str] | None = None,
+    model_level: int | None = None,
+    feedback_score: float | None = None,
+    capital_protected: float | None = None,
 ) -> User:
     user = await get_user(session, user_id)
     if user is None:
@@ -257,11 +295,12 @@ async def upsert_user(
         user.enforce_mode = enforce_mode
     if initial_parameters is not None:
         user.initial_parameters = initial_parameters
-
-    if not DB_AVAILABLE:
-        _memory_users[user_id] = user
-        return user
-
+    if model_level is not None:
+        user.model_level = model_level
+    if feedback_score is not None:
+        user.feedback_score = feedback_score
+    if capital_protected is not None:
+        user.capital_protected = capital_protected
     try:
         await session.commit()
         await session.refresh(user)
