@@ -661,7 +661,50 @@ async def analyze_trade(
             maturity_state,
         )
     else:
-        assessment = await asyncio.to_thread(brain.assess_risk, context, skip_explanation=True)
+        # Check if the user has breached losing_streak >= 2 in the last 12 hours.
+        losing_streak_breached_12h = False
+        if context.losing_streak >= 2:
+            losing_streak_breached_12h = True
+        else:
+            from datetime import timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+            from sentinel.infra.db import DB_AVAILABLE, _memory_behavioral_logs, hash_user_id
+            if not DB_AVAILABLE:
+                user_hash = hash_user_id(context.user_id)
+                for log in _memory_behavioral_logs:
+                    log_created = getattr(log, "created_at", None)
+                    if log_created and getattr(log, "user_hash", None) == user_hash:
+                        if log_created >= cutoff and getattr(log, "losing_streak", 0) >= 2:
+                            losing_streak_breached_12h = True
+                            break
+            else:
+                try:
+                    from sqlalchemy import select
+                    from sentinel.infra.db import BehavioralLog
+                    res = await session.execute(
+                        select(BehavioralLog.losing_streak)
+                        .where(BehavioralLog.user_hash == hash_user_id(context.user_id))
+                        .where(BehavioralLog.created_at >= cutoff)
+                        .where(BehavioralLog.losing_streak >= 2)
+                        .limit(1)
+                    )
+                    if res.scalar() is not None:
+                        losing_streak_breached_12h = True
+                except Exception:
+                    user_hash = hash_user_id(context.user_id)
+                    for log in _memory_behavioral_logs:
+                        log_created = getattr(log, "created_at", None)
+                        if log_created and getattr(log, "user_hash", None) == user_hash:
+                            if log_created >= cutoff and getattr(log, "losing_streak", 0) >= 2:
+                                losing_streak_breached_12h = True
+                                break
+
+        assessment = await asyncio.to_thread(
+            brain.assess_risk,
+            context,
+            skip_explanation=True,
+            losing_streak_breached_12h=losing_streak_breached_12h,
+        )
 
     try:
         await cache_manager.cache_risk_score(cache_key, assessment.model_dump(mode="json"))
@@ -1098,6 +1141,40 @@ async def get_user_dashboard(
             if scores:
                 circadian_risk_profile[h] = round(sum(scores) / len(scores), 4)
 
+    # Calculate 12-hour losing streak breach state
+    losing_streak_breached_12h = False
+    from datetime import timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    if not DB_AVAILABLE:
+        user_hash = hash_user_id(user_id)
+        for log in _memory_behavioral_logs:
+            log_created = getattr(log, "created_at", None)
+            if log_created and getattr(log, "user_hash", None) == user_hash:
+                if log_created >= cutoff and getattr(log, "losing_streak", 0) >= 2:
+                    losing_streak_breached_12h = True
+                    break
+    else:
+        try:
+            from sqlalchemy import select
+            from sentinel.infra.db import BehavioralLog
+            res = await session.execute(
+                select(BehavioralLog.losing_streak)
+                .where(BehavioralLog.user_hash == hash_user_id(user_id))
+                .where(BehavioralLog.created_at >= cutoff)
+                .where(BehavioralLog.losing_streak >= 2)
+                .limit(1)
+            )
+            if res.scalar() is not None:
+                losing_streak_breached_12h = True
+        except Exception:
+            user_hash = hash_user_id(user_id)
+            for log in _memory_behavioral_logs:
+                log_created = getattr(log, "created_at", None)
+                if log_created and getattr(log, "user_hash", None) == user_hash:
+                    if log_created >= cutoff and getattr(log, "losing_streak", 0) >= 2:
+                        losing_streak_breached_12h = True
+                        break
+
     return WorkspaceSummary(
         user_id=user_id,
         profile=profile,
@@ -1112,6 +1189,7 @@ async def get_user_dashboard(
         discipline_streak=discipline_streak,
         active_capital_at_risk=active_capital_at_risk,
         circadian_risk_profile=circadian_risk_profile,
+        losing_streak_breached_12h=losing_streak_breached_12h,
     )
 
 

@@ -268,7 +268,12 @@ class SentinelBrain:
     # PREDICTION (with circuit breaker)
     # =========================================================================
 
-    def assess_risk(self, context: TradeContext, skip_explanation: bool = True) -> RiskAssessment:
+    def assess_risk(
+        self,
+        context: TradeContext,
+        skip_explanation: bool = True,
+        losing_streak_breached_12h: bool = False,
+    ) -> RiskAssessment:
         """
         Evaluate a trade and return a full RiskAssessment.
 
@@ -302,7 +307,12 @@ class SentinelBrain:
             )
 
         try:
-            result = self._predict(context, start_time, skip_explanation)
+            result = self._predict(
+                context,
+                start_time,
+                skip_explanation,
+                losing_streak_breached_12h=losing_streak_breached_12h,
+            )
             self._reset_circuit_breaker()
             return result
         except Exception as exc:
@@ -378,14 +388,21 @@ class SentinelBrain:
         context: TradeContext,
         start_time: float,
         skip_explanation: bool = True,
+        losing_streak_breached_12h: bool = False,
     ) -> RiskAssessment:
         """Core prediction logic — no error handling (caller wraps)."""
         # Convert Pydantic model to feature vector using NumPy for O(1) inference speed
         X_input = self._context_to_numpy(context)
 
-        # 1. Anomaly Detection (Watchdog)
-        anomaly_score: int = int(self.iso_forest.predict(X_input)[0])
-        is_anomaly: bool = anomaly_score == -1
+        # 1. Anomaly Detection (Watchdog) with dynamic sensitivity
+        # By default, IsolationForest flags anomaly if decision_function(X) < 0.0.
+        # If losing_streak_breached_12h is True, we tighten the threshold to 0.05 to increase anomaly sensitivity.
+        raw_anomaly_score: float = float(self.iso_forest.decision_function(X_input)[0])
+        anomaly_threshold = 0.0
+        if losing_streak_breached_12h:
+            anomaly_threshold = 0.05
+            
+        is_anomaly: bool = raw_anomaly_score < anomaly_threshold
 
         # 2. Risk Classification (Analyst)
         class_probs = self.classifier.predict_proba(X_input)[0]
@@ -426,6 +443,7 @@ class SentinelBrain:
             latency_ms=_elapsed_ms(start_time),
             mode=RiskMode.NORMAL,
             maturity_state=UserMaturity.MATURITY_2,
+            losing_streak_breached_12h=losing_streak_breached_12h,
         )
 
     # =========================================================================

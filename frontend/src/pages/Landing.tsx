@@ -137,10 +137,10 @@ export default function Landing() {
               </div>
 
               <h1 className="mt-6 max-w-4xl font-display text-4xl font-normal italic leading-[0.95] text-foreground sm:text-5xl lg:text-7xl">
-                The Algorithmic Hard-Stop.
+                Algorithmic Hard-Coded Lockout.
               </h1>
               <p className="mt-6 max-w-3xl text-base leading-8 text-muted-foreground sm:text-lg">
-                Willpower is a failed metric in high-stakes environments. Sentinel is an event-driven risk gateway that physically locks your MT5 terminal when it detects emotional tilt. Radical objectivity. Sub-500ms precision.
+                Stop blowing funded accounts due to a 5-minute emotional tilt. Sentinel is a dedicated risk gateway that intercepts revenge-trading cascades and locks your MT5 terminal at the broker layer. Radical objectivity. 12-Hour Breach Protection. Sub-50ms intercept speed.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">

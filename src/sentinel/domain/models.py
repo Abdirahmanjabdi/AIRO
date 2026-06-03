@@ -132,6 +132,7 @@ class RiskAssessment(BaseModel):
     mode: RiskMode = Field(default=RiskMode.NORMAL)
     maturity_state: UserMaturity | None = None
     shadow_mode: bool = False
+    losing_streak_breached_12h: bool = False
 
 
 class UserBaseline(BaseModel):
@@ -260,6 +261,7 @@ class WorkspaceSummary(BaseModel):
     discipline_streak: int = 0
     active_capital_at_risk: float = 0.0
     circadian_risk_profile: dict[int, float] = Field(default_factory=dict)
+    losing_streak_breached_12h: bool = False
 
 
 class AdminUserRecord(BaseModel):

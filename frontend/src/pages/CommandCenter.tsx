@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Activity, ArrowRight, BrainCircuit, ShieldAlert, ShieldCheck, TimerReset } from "lucide-react";
+import { motion } from "framer-motion";
 
 import MetricCard from "@/components/MetricCard";
 import MiniSparkline from "@/components/MiniSparkline";
@@ -298,7 +299,7 @@ export default function CommandCenter({
       : "HISTORY PENDING";
 
   return (
-    <div className="space-y-6 qasali-grid p-4 min-h-screen">
+    <div className={`space-y-6 p-4 min-h-screen transition-all duration-1000 ${dashboard?.losing_streak_breached_12h ? "restricted-grid" : "qasali-grid"}`}>
       {/* 🛑 FULL-SCREEN UNIGNORABLE LOCKOUT OVERLAY */}
       {lockoutActive && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0A0F1A]/96 backdrop-blur-xl">
@@ -345,6 +346,25 @@ export default function CommandCenter({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ⚠️ TILT SEQUENCE ALERT BANNER */}
+      {dashboard?.losing_streak_breached_12h && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="border border-red-500/30 bg-red-950/20 p-4 backdrop-blur-md flex items-center justify-between text-red-500 rounded-none mb-6"
+        >
+          <div className="flex items-center gap-3">
+            <ShieldAlert className="text-red-500 animate-pulse" size={18} />
+            <div className="text-xs font-mono uppercase tracking-wider font-bold">
+              System Alert: Tilt Sequence Detected. Anomaly Sensitivity Tightened to 0.05.
+            </div>
+          </div>
+          <span className="text-[9px] bg-red-500/20 border border-red-500/40 px-2 py-0.5 font-mono font-bold">
+            RESTRICTED MODE
+          </span>
+        </motion.div>
       )}
 
       <KillSwitchModal isOpen={isKillSwitchOpen} onAcknowledge={() => setIsKillSwitchOpen(false)} />
@@ -595,7 +615,11 @@ export default function CommandCenter({
           </SurfacePanel>
 
           <div className="flex flex-col gap-4">
-            <RiskRadarChart latestAssessment={latest} riskThreshold={dashboard?.profile.risk_threshold ?? 0.6537} />
+            <RiskRadarChart 
+              latestAssessment={latest} 
+              riskThreshold={dashboard?.profile.risk_threshold ?? 0.6537} 
+              losingStreakBreached12h={!!dashboard?.losing_streak_breached_12h}
+            />
             <div className="grid grid-cols-2 gap-4">
               <MetricCard
                 label="Protection events"

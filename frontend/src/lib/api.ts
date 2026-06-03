@@ -107,6 +107,7 @@ export interface WorkspaceSummary {
   discipline_streak: number;
   active_capital_at_risk: number;
   circadian_risk_profile: Record<number, number>;
+  losing_streak_breached_12h?: boolean;
 }
 
 export interface AdminUserRecord {
@@ -151,6 +152,7 @@ export interface RiskAssessment {
   mode: RiskMode;
   maturity_state: UserMaturity | null;
   shadow_mode: boolean;
+  losing_streak_breached_12h?: boolean;
 }
 
 export interface AnalyzeTradeRequest {

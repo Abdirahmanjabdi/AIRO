@@ -13,38 +13,45 @@ import type { RiskAuditRecord } from "@/lib/api";
 interface RiskRadarChartProps {
   latestAssessment: RiskAuditRecord | null;
   riskThreshold: number;
+  losingStreakBreached12h?: boolean;
 }
 
-export default function RiskRadarChart({ latestAssessment, riskThreshold }: RiskRadarChartProps) {
+export default function RiskRadarChart({
+  latestAssessment,
+  riskThreshold,
+  losingStreakBreached12h = false,
+}: RiskRadarChartProps) {
   // Map current telemetry metrics to normalized radar dimensions (0 to 100 scale)
   const normalizedData = [
     {
       metric: "Drawdown",
-      "Current Risk": latestAssessment ? Math.min(100, latestAssessment.drawdown_state * 300) : 0,
+      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).drawdown_state * 300 || 0) : 0,
       "Safe Limit": 30, // 10% drawdown threshold
     },
     {
       metric: "Losing Streak",
-      "Current Risk": latestAssessment ? Math.min(100, latestAssessment.losing_streak * 20) : 0,
+      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).losing_streak * 20 || 0) : 0,
       "Safe Limit": 60, // 3 consecutive losses
     },
     {
       metric: "Time Pressure",
       // Revenge timer: less time elapsed = higher pressure
-      "Current Risk": latestAssessment ? Math.max(0, 100 - (latestAssessment.revenge_timer / 10)) : 0,
+      "Current Risk": latestAssessment ? Math.max(0, 100 - ((latestAssessment as any).revenge_timer / 10 || 0)) : 0,
       "Safe Limit": 50, // 500 seconds cooldown
     },
     {
       metric: "Lot Deviation",
-      "Current Risk": latestAssessment ? Math.min(100, latestAssessment.lot_deviation * 25) : 0,
+      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).lot_deviation * 25 || 0) : 0,
       "Safe Limit": 50, // 2 standard deviations
     },
     {
       metric: "Vol Deviation",
-      "Current Risk": latestAssessment ? Math.min(100, latestAssessment.realized_vol_20 * 1500) : 0,
+      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).realized_vol_20 * 1500 || 0) : 0,
       "Safe Limit": 40,
     }
   ];
+
+  const primaryColor = losingStreakBreached12h ? "#DC2626" : "#CBA153";
 
   return (
     <div className="w-full h-[280px] bg-card/45 border border-border/80 p-5 backdrop-blur-xl flex flex-col justify-between">
@@ -53,8 +60,12 @@ export default function RiskRadarChart({ latestAssessment, riskThreshold }: Risk
           <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Behavioral DNA Profile</div>
           <div className="text-xs text-foreground/80 mt-1 font-medium">Real-time risk boundary vs. baseline limit</div>
         </div>
-        <span className="text-[9px] bg-primary/20 border border-primary/40 px-2 py-0.5 text-primary font-mono tracking-wider font-bold">
-          LIVE DNA SCAN
+        <span className={`text-[9px] border px-2 py-0.5 font-mono tracking-wider font-bold ${
+          losingStreakBreached12h 
+            ? "bg-red-500/20 border-red-500/40 text-red-500 animate-pulse" 
+            : "bg-primary/20 border-primary/40 text-primary"
+        }`}>
+          {losingStreakBreached12h ? "RESTRICTED SCAN" : "LIVE DNA SCAN"}
         </span>
       </div>
 
@@ -75,8 +86,8 @@ export default function RiskRadarChart({ latestAssessment, riskThreshold }: Risk
             <Radar
               name="Active Sizing Risk"
               dataKey="Current Risk"
-              stroke="#CBA153"
-              fill="#CBA153"
+              stroke={primaryColor}
+              fill={primaryColor}
               fillOpacity={0.2}
               strokeWidth={1.5}
             />
