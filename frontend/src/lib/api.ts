@@ -21,6 +21,8 @@ export interface ReadinessResponse {
   model_loaded: boolean;
   redis_connected: boolean;
   db_connected: boolean;
+  vault_connected?: boolean;
+  vault_required?: boolean;
   details: Record<string, string>;
 }
 
@@ -87,10 +89,23 @@ export interface RiskAuditRecord {
   is_anomaly: boolean;
   top_reason: string | null;
   explanation: FeatureContribution[];
+  losing_streak?: number;
+  drawdown_state?: number;
+  lot_deviation?: number;
+  revenge_timer?: number;
+  lots?: number;
+  rr_ratio?: number;
+  realized_vol_20?: number;
+  trend_momentum?: number;
   latency_ms: number;
   cached: boolean;
   autopsy_submitted: boolean;
   created_at: string;
+}
+
+export interface AutopsyResponse {
+  status: "success";
+  message: string;
 }
 
 export interface WorkspaceSummary {
@@ -216,6 +231,9 @@ function resolveApiBaseUrl(): string {
   }
 
   const configured = import.meta.env.VITE_BRAIN_API_URL?.trim();
+  if (configured === "same-origin") {
+    return "";
+  }
   if (configured) {
     return configured.replace(/\/+$/, "");
   }
@@ -396,7 +414,7 @@ export const sentinelApi = {
     return () => clearInterval(interval);
   },
 
-  submitAutopsy(userId: string, auditId: number, feedbackLabel: "VALID_INTERCEPT" | "FALSE_POSITIVE", estimatedCapitalSaved = 0.0): Promise<any> {
+  submitAutopsy(userId: string, auditId: number, feedbackLabel: "VALID_INTERCEPT" | "FALSE_POSITIVE", estimatedCapitalSaved = 0.0): Promise<AutopsyResponse> {
     return apiRequest(`/v1/user/${encodeURIComponent(userId)}/autopsy`, {
       method: "POST",
       body: JSON.stringify({

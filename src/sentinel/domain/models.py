@@ -8,14 +8,14 @@ bridge, and persistence boundaries.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class Decision(str, Enum):
+class Decision(StrEnum):
     """Risk engine output decision."""
 
     ALLOW = "ALLOW"
@@ -23,7 +23,7 @@ class Decision(str, Enum):
     REDUCE_SIZE = "REDUCE_SIZE"
 
 
-class OnboardingState(str, Enum):
+class OnboardingState(StrEnum):
     """Async onboarding job lifecycle."""
 
     PENDING = "pending"
@@ -34,7 +34,7 @@ class OnboardingState(str, Enum):
     FAILED = "failed"
 
 
-class RiskMode(str, Enum):
+class RiskMode(StrEnum):
     """Brain operating mode for audit trail and UI state."""
 
     NORMAL = "normal"
@@ -44,7 +44,7 @@ class RiskMode(str, Enum):
     BOOTSTRAP = "bootstrap"
 
 
-class UserMaturity(str, Enum):
+class UserMaturity(StrEnum):
     """Cold-start maturity lane for a user's behavioral model."""
 
     MATURITY_0 = "maturity_0"
@@ -52,7 +52,7 @@ class UserMaturity(str, Enum):
     MATURITY_2 = "maturity_2"
 
 
-class TradingStyle(str, Enum):
+class TradingStyle(StrEnum):
     """Self-declared trading cadence captured during onboarding."""
 
     SCALPER = "scalper"
@@ -60,7 +60,7 @@ class TradingStyle(str, Enum):
     SWING = "swing"
 
 
-class TiltResponse(str, Enum):
+class TiltResponse(StrEnum):
     """Self-declared behavior after a loss."""
 
     WAIT_FOR_SETUP = "wait_for_setup"
@@ -158,9 +158,7 @@ class UserBaseline(BaseModel):
         data = getattr(info, "data", {})
         trade_count = data.get("trade_count", 0)
         if value and trade_count < 1:
-            raise ValueError(
-                f"Cannot be baseline_ready with only {trade_count} trades"
-            )
+            raise ValueError(f"Cannot be baseline_ready with only {trade_count} trades")
         return value
 
 
@@ -220,7 +218,7 @@ class OnboardingStatus(BaseModel):
     trade_count: int = Field(default=0, ge=0)
     message: str = Field(default="Job queued")
     model_s3_key: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     api_key: str | None = None
     api_key_last4: str | None = None
@@ -242,7 +240,7 @@ class RiskAuditRecord(BaseModel):
     latency_ms: float = Field(..., ge=0.0)
     cached: bool = False
     autopsy_submitted: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class WorkspaceSummary(BaseModel):
@@ -312,7 +310,7 @@ class Intervention(BaseModel):
 
     intervention_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     symbol: str
     decision: Decision
     risk_score: float = Field(..., ge=0.0, le=1.0)
@@ -342,7 +340,7 @@ class HealthResponse(BaseModel):
 
     status: Literal["ok", "degraded", "down"]
     version: str = Field(default="1.0.0")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ReadinessResponse(BaseModel):
@@ -373,6 +371,7 @@ class AdminOverview(BaseModel):
 
 class FeedbackSubmission(BaseModel):
     """autopsy feedback submitted by the user after cooldown expires."""
+
     user_id: str
     audit_id: int
     feedback_label: Literal["VALID_INTERCEPT", "FALSE_POSITIVE"]

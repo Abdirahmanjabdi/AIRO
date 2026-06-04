@@ -47,12 +47,12 @@ describe("frontend product shell", () => {
     );
 
     expect(
-      await screen.findByText("The command layer for traders you cannot afford to lose."),
+      await screen.findByText("Algorithmic Hard-Coded Lockout."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Real answers for the product we are actually shipping."),
+      screen.getByText(/Stop blowing funded accounts due to a 5-minute emotional tilt/i),
     ).toBeInTheDocument();
-    expect(screen.getByText("Platform facts")).toBeInTheDocument();
+    expect(screen.getByText("Live runtime")).toBeInTheDocument();
   });
 
   it("keeps operator-only admin navigation out of the default sidebar", () => {

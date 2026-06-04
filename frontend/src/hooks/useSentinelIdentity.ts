@@ -8,7 +8,7 @@ export interface SentinelIdentity {
 }
 
 const STORAGE_KEY = "sentinel-zero.identity";
-const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const MAX_AGE_MS = 1000 * 60 * 60 * 23;
 
 interface StoredIdentity {
   identity: SentinelIdentity;

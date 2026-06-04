@@ -14,14 +14,19 @@ import re
 import secrets
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sentinel.api.dependencies import cache_user_brain, get_user_brain, verify_tenant_isolation, rate_limiter
+from sentinel.api.dependencies import (
+    cache_user_brain,
+    get_user_brain,
+    rate_limiter,
+    verify_tenant_isolation,
+)
 from sentinel.brain.feature_engine import FEATURE_COLUMNS_V2, engineer_features
 from sentinel.brain.risk_engine import SentinelBrain, get_progression_level
 from sentinel.domain.models import (
@@ -30,24 +35,25 @@ from sentinel.domain.models import (
     CredentialRequest,
     CredentialResponse,
     Decision,
+    FeedbackSubmission,
     HistoricalTrade,
     OnboardingDataSubmission,
     OnboardingRequest,
     OnboardingState,
     OnboardingStatus,
-    RiskAuditRecord,
     RiskAssessment,
+    RiskAuditRecord,
     TradeContext,
     UserBaseline,
     UserInitialParameters,
     UserMaturity,
-    WorkspaceSummary,
     WhopWebhookRequest,
     WhopWebhookResponse,
-    FeedbackSubmission,
+    WorkspaceSummary,
 )
 from sentinel.infra.db import (
     AsyncSessionLocal,
+    BehavioralLog,
     create_onboarding_job,
     get_db,
     get_onboarding_job,
@@ -59,11 +65,10 @@ from sentinel.infra.db import (
     list_users,
     record_behavioral_log,
     record_risk_audit,
-    upsert_api_credential,
     update_onboarding_job,
-    upsert_user,
     update_risk_audit_explanation,
-    BehavioralLog,
+    upsert_api_credential,
+    upsert_user,
 )
 from sentinel.infra.redis_cache import cache_manager
 from sentinel.infra.s3 import model_store
@@ -98,9 +103,10 @@ def _build_helm_command(user_id: str, plan: str, release_name: str) -> str:
 def duplicate_mt5_directory(user_id: str) -> str:
     """Duplicate C:\\Sentinel\\Master_MT5 into user-specific folder for isolated Portable Mode."""
     import shutil
+
     source_dir = "C:\\Sentinel\\Master_MT5"
     target_dir = f"C:\\Sentinel\\Users\\{user_id}"
-    
+
     if not os.path.exists(target_dir):
         logger.info("Dynamically copying Master MT5 template to isolated target: %s", target_dir)
         try:
@@ -117,30 +123,32 @@ def duplicate_mt5_directory(user_id: str) -> str:
 
 
 def _job_to_status(job: object) -> OnboardingStatus:
-    job_state = getattr(job, "state")
+    job_state = job.state
     return OnboardingStatus(
-        job_id=str(getattr(job, "job_id")),
-        user_id=str(getattr(job, "user_id")),
+        job_id=str(job.job_id),
+        user_id=str(job.user_id),
         state=OnboardingState(str(job_state)),
-        trade_count=int(getattr(job, "trade_count") or 0),
-        message=str(getattr(job, "message") or "Job queued"),
-        model_s3_key=getattr(job, "model_s3_key"),
-        created_at=getattr(job, "created_at") or datetime.utcnow(),
-        completed_at=getattr(job, "completed_at"),
+        trade_count=int(job.trade_count or 0),
+        message=str(job.message or "Job queued"),
+        model_s3_key=job.model_s3_key,
+        created_at=job.created_at or datetime.now(UTC),
+        completed_at=job.completed_at,
     )
 
 
 def _user_to_profile(user: object) -> UserBaseline:
     initial_raw = getattr(user, "initial_parameters", None) or {}
     return UserBaseline(
-        user_id=str(getattr(user, "user_id")),
-        broker_server=getattr(user, "broker_server"),
-        account_id=getattr(user, "account_id"),
-        trade_count=int(getattr(user, "trade_count") or 0),
-        model_s3_key=getattr(user, "model_s3_key"),
-        trained_at=getattr(user, "trained_at"),
-        is_baseline_ready=bool(getattr(user, "is_baseline_ready")),
-        maturity_state=UserMaturity(str(getattr(user, "maturity_state", UserMaturity.MATURITY_0.value))),
+        user_id=str(user.user_id),
+        broker_server=user.broker_server,
+        account_id=user.account_id,
+        trade_count=int(user.trade_count or 0),
+        model_s3_key=user.model_s3_key,
+        trained_at=user.trained_at,
+        is_baseline_ready=bool(user.is_baseline_ready),
+        maturity_state=UserMaturity(
+            str(getattr(user, "maturity_state", UserMaturity.MATURITY_0.value))
+        ),
         enforce_mode=bool(getattr(user, "enforce_mode", False)),
         model_level=int(getattr(user, "model_level", 1) or 1),
         initial_parameters=UserInitialParameters.model_validate(initial_raw),
@@ -149,22 +157,26 @@ def _user_to_profile(user: object) -> UserBaseline:
 
 def _audit_to_record(audit: object, submitted_audit_ids: set[int] | None = None) -> RiskAuditRecord:
     audit_id = getattr(audit, "id", None)
-    submitted = (audit_id in submitted_audit_ids) if (submitted_audit_ids is not None and audit_id is not None) else False
+    submitted = (
+        (audit_id in submitted_audit_ids)
+        if (submitted_audit_ids is not None and audit_id is not None)
+        else False
+    )
     return RiskAuditRecord(
         audit_id=audit_id,
-        user_id=str(getattr(audit, "user_id")),
-        symbol=str(getattr(audit, "symbol") or "UNKNOWN"),
-        decision=Decision(str(getattr(audit, "decision"))),
-        risk_score=float(getattr(audit, "risk_score") or 0.0),
-        size_multiplier=float(getattr(audit, "size_multiplier") or 0.0),
-        mode=str(getattr(audit, "mode") or "normal"),
-        is_anomaly=bool(getattr(audit, "is_anomaly")),
-        top_reason=getattr(audit, "top_reason"),
+        user_id=str(audit.user_id),
+        symbol=str(audit.symbol or "UNKNOWN"),
+        decision=Decision(str(audit.decision)),
+        risk_score=float(audit.risk_score or 0.0),
+        size_multiplier=float(audit.size_multiplier or 0.0),
+        mode=str(audit.mode or "normal"),
+        is_anomaly=bool(audit.is_anomaly),
+        top_reason=audit.top_reason,
         explanation=getattr(audit, "explanation", []) or [],
-        latency_ms=float(getattr(audit, "latency_ms") or 0.0),
-        cached=bool(getattr(audit, "cached")),
+        latency_ms=float(audit.latency_ms or 0.0),
+        cached=bool(audit.cached),
         autopsy_submitted=submitted,
-        created_at=getattr(audit, "created_at") or datetime.utcnow(),
+        created_at=audit.created_at or datetime.now(UTC),
     )
 
 
@@ -304,9 +316,10 @@ async def _retrain_user_model_from_behavioral_logs(user_id: str) -> None:
             model_path.unlink(missing_ok=True)
 
             from sentinel.brain.risk_engine import get_progression_level
+
             next_level = get_progression_level(len(logs))
 
-            trained_at = datetime.now(timezone.utc)
+            trained_at = datetime.now(UTC)
             await upsert_user(
                 session,
                 user_id,
@@ -318,7 +331,12 @@ async def _retrain_user_model_from_behavioral_logs(user_id: str) -> None:
                 model_level=next_level,
             )
             cache_user_brain(user_id, model_key, brain)
-            logger.info("Retrained personalized model for %s (Level %d) from %d behavioral logs.", user_id, next_level, len(logs))
+            logger.info(
+                "Retrained personalized model for %s (Level %d) from %d behavioral logs.",
+                user_id,
+                next_level,
+                len(logs),
+            )
         except Exception:
             logger.exception("Behavioral-log retraining failed for %s", user_id)
 
@@ -331,7 +349,9 @@ def _maturity_for_trade_count(trade_count: int, baseline_ready: bool) -> UserMat
     return UserMaturity.MATURITY_0
 
 
-def _next_live_maturity(profile: UserBaseline, brain_loaded: bool, next_trade_count: int) -> UserMaturity:
+def _next_live_maturity(
+    profile: UserBaseline, brain_loaded: bool, next_trade_count: int
+) -> UserMaturity:
     return _maturity_for_trade_count(
         next_trade_count,
         profile.is_baseline_ready and brain_loaded,
@@ -345,17 +365,24 @@ async def _compute_shap_background(
 ) -> None:
     try:
         from sentinel.infra.db import AsyncSessionLocal
+
         async with AsyncSessionLocal() as session:
             brain = await get_user_brain(user_id, session)
             if brain is None:
                 brain = SentinelBrain()
-            
+
             X_input = brain._context_to_dataframe(context)
             explanation = await asyncio.to_thread(brain._explain, X_input)
-            
-            exp_list = [e.model_dump(mode="json") for e in explanation] if hasattr(explanation[0], "model_dump") else [e for e in explanation] if explanation else []
+
+            exp_list = (
+                [e.model_dump(mode="json") for e in explanation]
+                if hasattr(explanation[0], "model_dump")
+                else [e for e in explanation]
+                if explanation
+                else []
+            )
             top_reason = exp_list[0]["feature"] if exp_list else None
-            
+
             await update_risk_audit_explanation(session, audit_id, exp_list, top_reason)
     except Exception:
         logger.exception("Background SHAP calculation failed for %s", user_id)
@@ -391,7 +418,7 @@ async def _train_and_persist_user_model(
                     ),
                     trade_count=0,
                     model_s3_key=None,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
                 logger.info("Blank baseline recorded for user %s", submission.user_id)
                 return
@@ -405,7 +432,7 @@ async def _train_and_persist_user_model(
             feature_frame = _seed_feature_frame_with_risk_dna(feature_frame, initial_parameters)
             trade_count = len(submission.trades)
             if trade_count < 20:
-                trained_at = datetime.now(timezone.utc)
+                trained_at = datetime.now(UTC)
                 await upsert_user(
                     session,
                     submission.user_id,
@@ -428,7 +455,11 @@ async def _train_and_persist_user_model(
                     model_s3_key=None,
                     completed_at=trained_at,
                 )
-                logger.info("Cold-start Rule-Based Risk DNA Layer activated for user %s with %d trades.", submission.user_id, trade_count)
+                logger.info(
+                    "Cold-start Rule-Based Risk DNA Layer activated for user %s with %d trades.",
+                    submission.user_id,
+                    trade_count,
+                )
                 return
 
             brain = SentinelBrain()
@@ -438,13 +469,15 @@ async def _train_and_persist_user_model(
                 model_path = Path(handle.name)
 
             await asyncio.to_thread(brain.save, model_path)
-            model_key = await asyncio.to_thread(model_store.upload_model, submission.user_id, model_path)
+            model_key = await asyncio.to_thread(
+                model_store.upload_model, submission.user_id, model_path
+            )
             model_path.unlink(missing_ok=True)
 
             trade_count = len(submission.trades)
             required_trade_count = _risk_dna_minimum_history(int(job.min_trades))
             baseline_ready = trade_count >= required_trade_count
-            trained_at = datetime.now(timezone.utc)
+            trained_at = datetime.now(UTC)
             await upsert_user(
                 session,
                 submission.user_id,
@@ -477,7 +510,9 @@ async def _train_and_persist_user_model(
             cache_user_brain(submission.user_id, model_key, brain)
             logger.info("Onboarding complete for user %s", submission.user_id)
         except Exception as exc:
-            logger.error("Failed to train onboarding job %s: %s", submission.job_id, exc, exc_info=True)
+            logger.error(
+                "Failed to train onboarding job %s: %s", submission.job_id, exc, exc_info=True
+            )
             await update_onboarding_job(
                 session,
                 submission.job_id,
@@ -578,16 +613,27 @@ async def analyze_trade(
     background_tasks: BackgroundTasks,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    _rate = Depends(rate_limiter),
+    _rate=Depends(rate_limiter),
 ) -> RiskAssessment:
     auth_user_id = getattr(request.state, "user_id", None)
-    if not os.getenv("SENTINEL_AUTH_DISABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
+    if os.getenv("SENTINEL_AUTH_DISABLED", "false").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         if not auth_user_id or auth_user_id != context.user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access Denied: Tenant Isolation violation."
+                detail="Access Denied: Tenant Isolation violation.",
             )
-    logger.info("analyze_trade received position_id: %s for user %s (symbol=%s, lots=%.2f)", context.position_id, context.user_id, context.symbol, context.lots)
+    logger.info(
+        "analyze_trade received position_id: %s for user %s (symbol=%s, lots=%.2f)",
+        context.position_id,
+        context.user_id,
+        context.symbol,
+        context.lots,
+    )
     payload = context.model_dump(mode="json")
     cache_key = cache_manager.build_risk_cache_key(context.user_id, payload)
 
@@ -666,9 +712,11 @@ async def analyze_trade(
         if context.losing_streak >= 2:
             losing_streak_breached_12h = True
         else:
-            from datetime import timedelta, timezone
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+            from datetime import timedelta
+
+            cutoff = datetime.now(UTC) - timedelta(hours=12)
             from sentinel.infra.db import DB_AVAILABLE, _memory_behavioral_logs, hash_user_id
+
             if not DB_AVAILABLE:
                 user_hash = hash_user_id(context.user_id)
                 for log in _memory_behavioral_logs:
@@ -680,7 +728,9 @@ async def analyze_trade(
             else:
                 try:
                     from sqlalchemy import select
+
                     from sentinel.infra.db import BehavioralLog
+
                     res = await session.execute(
                         select(BehavioralLog.losing_streak)
                         .where(BehavioralLog.user_hash == hash_user_id(context.user_id))
@@ -720,20 +770,45 @@ async def analyze_trade(
         # Derive which feature drove the block based on the raw context values
         signals: list[tuple[str, float, str]] = []
         if context.drawdown_state > 0.03:
-            signals.append(("drawdown_state", context.drawdown_state, "Account drawdown exceeds 3% threshold"))
+            signals.append(
+                ("drawdown_state", context.drawdown_state, "Account drawdown exceeds 3% threshold")
+            )
         if context.losing_streak >= 3:
-            signals.append(("losing_streak", float(context.losing_streak), f"{context.losing_streak} consecutive losses detected"))
+            signals.append(
+                (
+                    "losing_streak",
+                    float(context.losing_streak),
+                    f"{context.losing_streak} consecutive losses detected",
+                )
+            )
         if 0 < context.revenge_timer < 300:
-            signals.append(("revenge_timer", context.revenge_timer, "Position opened <5 min after a loss — revenge pattern"))
+            signals.append(
+                (
+                    "revenge_timer",
+                    context.revenge_timer,
+                    "Position opened <5 min after a loss — revenge pattern",
+                )
+            )
         if context.lot_deviation > 1.5:
-            signals.append(("lot_deviation", context.lot_deviation, "Lot size deviates significantly from baseline"))
+            signals.append(
+                (
+                    "lot_deviation",
+                    context.lot_deviation,
+                    "Lot size deviates significantly from baseline",
+                )
+            )
         if not signals:
-            signals.append(("baseline_pending", 1.0, "No trade baseline established — conservative block until model trains"))
+            signals.append(
+                (
+                    "baseline_pending",
+                    1.0,
+                    "No trade baseline established — conservative block until model trains",
+                )
+            )
 
         signals.sort(key=lambda s: s[1], reverse=True)
         fallback_explanation = [
-            {"feature": feat, "impact": round(val * 0.3, 4)}
-            for feat, val, desc in signals
+            {"feature": feat, "impact": round(val * 0.3, 4)} for feat, val, desc in signals
         ]
         fallback_top_reason = signals[0][0]
 
@@ -782,19 +857,25 @@ async def analyze_trade(
                 is_anomaly=assessment.is_anomaly,
             )
             next_trade_count = profile.trade_count + 1
-            next_maturity = _next_live_maturity(profile, brain is not None and brain.is_trained, next_trade_count)
+            next_maturity = _next_live_maturity(
+                profile, brain is not None and brain.is_trained, next_trade_count
+            )
             next_level = get_progression_level(next_trade_count)
             await upsert_user(
                 session,
                 context.user_id,
                 trade_count=next_trade_count,
                 maturity_state=next_maturity.value,
-                is_baseline_ready=profile.is_baseline_ready and brain is not None and brain.is_trained,
+                is_baseline_ready=profile.is_baseline_ready
+                and brain is not None
+                and brain.is_trained,
                 model_level=next_level,
             )
             recent_logs = await list_behavioral_logs(session, user_id=context.user_id, limit=500)
             if recent_logs:
-                lot_values = pd.Series([float(getattr(log, "lots", 0.0) or 0.0) for log in recent_logs])
+                lot_values = pd.Series(
+                    [float(getattr(log, "lots", 0.0) or 0.0) for log in recent_logs]
+                )
                 await cache_manager.cache_behavioral_profile(
                     context.user_id,
                     {
@@ -816,7 +897,9 @@ async def analyze_trade(
 
         # Only schedule SHAP if user has a real trained model
         if getattr(audit_record, "id", None) is not None and not fallback_explanation:
-            background_tasks.add_task(_compute_shap_background, context, context.user_id, audit_record.id)
+            background_tasks.add_task(
+                _compute_shap_background, context, context.user_id, audit_record.id
+            )
     except Exception:
         logger.exception("Failed to persist risk audit for %s", context.user_id)
 
@@ -876,7 +959,11 @@ async def start_onboarding(
     )
 
     async def publish_onboarding_command() -> None:
-        print(f"[BG] publish_onboarding_command started for user_id={request.user_id}, job_id={job_id}")
+        logger.info(
+            "publish_onboarding_command started for user_id=%s, job_id=%s",
+            request.user_id,
+            job_id,
+        )
         command = {
             "job_id": job_id,
             "user_id": request.user_id,
@@ -886,13 +973,10 @@ async def start_onboarding(
             "callback_url": f"{os.getenv('PUBLIC_API_BASE_URL', '').rstrip('/')}/v1/onboard/data",
         }
         try:
-            print(f"[BG] Enqueuing onboarding job to cache. r = {cache_manager.r}")
             await cache_manager.enqueue_onboarding_job(command)
-            print("[BG] Successfully enqueued onboarding job to cache")
-        except Exception as e:
-            print(f"[BG] ERROR: Failed to enqueue onboarding job: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.info("Successfully enqueued onboarding job to cache")
+        except Exception:
+            logger.exception("Failed to enqueue onboarding job")
 
         try:
             async with AsyncSessionLocal() as publish_session:
@@ -902,11 +986,9 @@ async def start_onboarding(
                     state=OnboardingState.PULLING_HISTORY.value,
                     message="MT5 bridge command queued. Waiting for historical trades.",
                 )
-            print("[BG] Successfully updated onboarding job state to pulling_history")
-        except Exception as e:
-            print(f"[BG] ERROR: Failed to update onboarding job state in DB: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.info("Updated onboarding job state to pulling_history")
+        except Exception:
+            logger.exception("Failed to update onboarding job state in DB")
 
     background_tasks.add_task(publish_onboarding_command)
     status_response = _job_to_status(job)
@@ -968,7 +1050,9 @@ async def receive_onboarding_data(
         )
         background_tasks.add_task(_train_and_persist_user_model, submission)
         if job is None:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job update failed.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job update failed."
+            )
         return _job_to_status(job)
     # Accept whatever history exists — new accounts simply get a partial baseline
     logger.info(
@@ -986,9 +1070,11 @@ async def receive_onboarding_data(
         trade_count=len(submission.trades),
     )
     background_tasks.add_task(_train_and_persist_user_model, submission)
-
-
-
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job update failed."
+        )
+    return _job_to_status(job)
 
 
 @router.get(
@@ -999,7 +1085,7 @@ async def receive_onboarding_data(
 async def get_user_profile(
     user_id: str,
     session: AsyncSession = Depends(get_db),
-    _auth = Depends(verify_tenant_isolation),
+    _auth=Depends(verify_tenant_isolation),
 ) -> UserBaseline:
     user = await get_user(session, user_id)
     if user is None:
@@ -1016,19 +1102,24 @@ async def get_user_audits(
     user_id: str,
     limit: int = 50,
     session: AsyncSession = Depends(get_db),
-    _auth = Depends(verify_tenant_isolation),
+    _auth=Depends(verify_tenant_isolation),
 ) -> list[RiskAuditRecord]:
     safe_limit = min(max(limit, 1), 200)
     audits = await list_risk_audits(session, user_id=user_id, limit=safe_limit)
     from sentinel.infra.db import DB_AVAILABLE, _memory_behavioral_logs, hash_user_id
+
     if not DB_AVAILABLE:
         submitted_ids = {
-            log.audit_id for log in _memory_behavioral_logs
-            if log.user_hash == hash_user_id(user_id) and log.user_feedback_label is not None and log.audit_id is not None
+            log.audit_id
+            for log in _memory_behavioral_logs
+            if log.user_hash == hash_user_id(user_id)
+            and log.user_feedback_label is not None
+            and log.audit_id is not None
         }
     else:
         try:
             from sqlalchemy import select
+
             res = await session.execute(
                 select(BehavioralLog.audit_id)
                 .where(BehavioralLog.user_hash == hash_user_id(user_id))
@@ -1037,11 +1128,13 @@ async def get_user_audits(
             submitted_ids = set(res.scalars().all())
         except Exception:
             submitted_ids = {
-                log.audit_id for log in _memory_behavioral_logs
-                if log.user_hash == hash_user_id(user_id) and log.user_feedback_label is not None and log.audit_id is not None
+                log.audit_id
+                for log in _memory_behavioral_logs
+                if log.user_hash == hash_user_id(user_id)
+                and log.user_feedback_label is not None
+                and log.audit_id is not None
             }
     return [_audit_to_record(audit, submitted_ids) for audit in audits]
-
 
 
 @router.get(
@@ -1053,7 +1146,7 @@ async def get_user_dashboard(
     user_id: str,
     limit: int = 50,
     session: AsyncSession = Depends(get_db),
-    _auth = Depends(verify_tenant_isolation),
+    _auth=Depends(verify_tenant_isolation),
 ) -> WorkspaceSummary:
     user = await get_user(session, user_id)
     profile = (
@@ -1064,14 +1157,19 @@ async def get_user_dashboard(
 
     audits = await list_risk_audits(session, user_id=user_id, limit=min(max(limit, 1), 200))
     from sentinel.infra.db import DB_AVAILABLE, _memory_behavioral_logs, hash_user_id
+
     if not DB_AVAILABLE:
         submitted_ids = {
-            log.audit_id for log in _memory_behavioral_logs
-            if log.user_hash == hash_user_id(user_id) and log.user_feedback_label is not None and log.audit_id is not None
+            log.audit_id
+            for log in _memory_behavioral_logs
+            if log.user_hash == hash_user_id(user_id)
+            and log.user_feedback_label is not None
+            and log.audit_id is not None
         }
     else:
         try:
             from sqlalchemy import select
+
             res = await session.execute(
                 select(BehavioralLog.audit_id)
                 .where(BehavioralLog.user_hash == hash_user_id(user_id))
@@ -1080,8 +1178,11 @@ async def get_user_dashboard(
             submitted_ids = set(res.scalars().all())
         except Exception:
             submitted_ids = {
-                log.audit_id for log in _memory_behavioral_logs
-                if log.user_hash == hash_user_id(user_id) and log.user_feedback_label is not None and log.audit_id is not None
+                log.audit_id
+                for log in _memory_behavioral_logs
+                if log.user_hash == hash_user_id(user_id)
+                and log.user_feedback_label is not None
+                and log.audit_id is not None
             }
     records = [_audit_to_record(audit, submitted_ids) for audit in audits]
 
@@ -1090,14 +1191,10 @@ async def get_user_dashboard(
         decision_counts[record.decision.value] += 1
 
     average_risk_score = (
-        sum(record.risk_score for record in records) / len(records)
-        if records
-        else 0.0
+        sum(record.risk_score for record in records) / len(records) if records else 0.0
     )
     average_latency_ms = (
-        sum(record.latency_ms for record in records) / len(records)
-        if records
-        else 0.0
+        sum(record.latency_ms for record in records) / len(records) if records else 0.0
     )
     protection_events = sum(
         1 for record in records if record.decision in {Decision.BLOCK, Decision.REDUCE_SIZE}
@@ -1119,7 +1216,9 @@ async def get_user_dashboard(
 
     # 3. Calculate active capital at risk
     if latest_record:
-        active_capital_at_risk = round(profile.initial_parameters.typical_lot_size * latest_record.size_multiplier * 5000.0, 2)
+        active_capital_at_risk = round(
+            profile.initial_parameters.typical_lot_size * latest_record.size_multiplier * 5000.0, 2
+        )
     else:
         active_capital_at_risk = round(profile.initial_parameters.typical_lot_size * 5000.0, 2)
 
@@ -1143,8 +1242,9 @@ async def get_user_dashboard(
 
     # Calculate 12-hour losing streak breach state
     losing_streak_breached_12h = False
-    from datetime import timedelta, timezone
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    from datetime import timedelta
+
+    cutoff = datetime.now(UTC) - timedelta(hours=12)
     if not DB_AVAILABLE:
         user_hash = hash_user_id(user_id)
         for log in _memory_behavioral_logs:
@@ -1156,7 +1256,9 @@ async def get_user_dashboard(
     else:
         try:
             from sqlalchemy import select
+
             from sentinel.infra.db import BehavioralLog
+
             res = await session.execute(
                 select(BehavioralLog.losing_streak)
                 .where(BehavioralLog.user_hash == hash_user_id(user_id))
@@ -1239,7 +1341,9 @@ async def get_admin_overview(
         )
 
     total_audits = len(audits)
-    blocked_decisions = sum(1 for audit in audits if getattr(audit, "decision", "") == Decision.BLOCK.value)
+    blocked_decisions = sum(
+        1 for audit in audits if getattr(audit, "decision", "") == Decision.BLOCK.value
+    )
     reduced_decisions = sum(
         1 for audit in audits if getattr(audit, "decision", "") == Decision.REDUCE_SIZE.value
     )
@@ -1270,18 +1374,19 @@ async def submit_autopsy_feedback(
     user_id: str,
     feedback: FeedbackSubmission,
     session: AsyncSession = Depends(get_db),
-    _rate = Depends(rate_limiter),
-    _auth = Depends(verify_tenant_isolation),
+    _rate=Depends(rate_limiter),
+    _auth=Depends(verify_tenant_isolation),
 ) -> dict:
     """Ingest post-tilt autopsy feedback and update rolling performance scores."""
     from sqlalchemy import select
+
     result = await session.execute(
         select(BehavioralLog).where(BehavioralLog.audit_id == feedback.audit_id)
     )
     log_record = result.scalar_one_or_none()
     if log_record:
         log_record.user_feedback_label = feedback.feedback_label
-        
+
     # 2. Update user rolling score and capital protected metric
     user = await get_user(session, user_id)
     if user:
@@ -1290,9 +1395,9 @@ async def submit_autopsy_feedback(
             user.feedback_score = round((user.feedback_score * 0.9) + 0.1, 4)
         else:
             user.feedback_score = round(user.feedback_score * 0.9, 4)  # Hit to precision
-            
+
         await session.commit()
-        
+
     return {"status": "success", "message": "Feedback integrated into model training loop"}
 
 
@@ -1303,16 +1408,18 @@ async def global_flywheel_retrain(session: AsyncSession) -> dict:
     retrains the global Isolation Forest and RandomForest classifier, and overwrites default_model.joblib.
     Additionally, exports the dataset as a secure Parquet file to a simulated S3 data lake.
     """
-    import pyarrow as pa
-    import pyarrow.parquet as pq
     import time
     from pathlib import Path
-    from sentinel.infra.db import hash_user_id
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     from sentinel.infra.s3 import model_store
-    
+
     logger.info("[Flywheel] Starting nightly global flywheel retraining...")
     try:
         from sqlalchemy import select
+
         result = await session.execute(select(BehavioralLog))
         logs = result.scalars().all()
     except Exception as e:
@@ -1320,7 +1427,9 @@ async def global_flywheel_retrain(session: AsyncSession) -> dict:
         return {"status": "failed", "reason": str(e)}
 
     if len(logs) < 20:
-        logger.warning("Insufficient logs for global flywheel retrain (got %d, need >= 20)", len(logs))
+        logger.warning(
+            "Insufficient logs for global flywheel retrain (got %d, need >= 20)", len(logs)
+        )
         return {"status": "skipped", "reason": "insufficient_data"}
 
     rows = []
@@ -1328,17 +1437,19 @@ async def global_flywheel_retrain(session: AsyncSession) -> dict:
     y_labels = []
 
     for log in logs:
-        rows.append({
-            "Hour_Decimal": float(log.hour_decimal),
-            "Losing_Streak": int(log.losing_streak),
-            "Drawdown_State": float(log.drawdown_state),
-            "Lot_Deviation": float(log.lot_deviation),
-            "Revenge_Timer": float(log.revenge_timer),
-            "Lots": float(log.lots),
-            "RR Ratio": float(log.rr_ratio),
-            "Realized_Vol_20": float(log.realized_vol_20),
-            "Trend_Momentum": float(log.trend_momentum),
-        })
+        rows.append(
+            {
+                "Hour_Decimal": float(log.hour_decimal),
+                "Losing_Streak": int(log.losing_streak),
+                "Drawdown_State": float(log.drawdown_state),
+                "Lot_Deviation": float(log.lot_deviation),
+                "Revenge_Timer": float(log.revenge_timer),
+                "Lots": float(log.lots),
+                "RR Ratio": float(log.rr_ratio),
+                "Realized_Vol_20": float(log.realized_vol_20),
+                "Trend_Momentum": float(log.trend_momentum),
+            }
+        )
 
         is_anomaly = bool(log.is_anomaly)
         y_labels.append(1 if is_anomaly or log.decision in {"BLOCK", "REDUCE_SIZE"} else 0)
@@ -1366,7 +1477,7 @@ async def global_flywheel_retrain(session: AsyncSession) -> dict:
 
     new_brain = SentinelBrain()
     try:
-        await asyncio.to_thread(new_brain.iso_forest.fit, X, sample_weight=sample_weights)
+        await asyncio.to_thread(new_brain.iso_forest.fit, X)
         await asyncio.to_thread(new_brain.classifier.fit, X, y, sample_weight=sample_weights)
         new_brain._is_trained = True
     except Exception as e:
@@ -1375,7 +1486,9 @@ async def global_flywheel_retrain(session: AsyncSession) -> dict:
 
     # Save & overwrite default baseline
     packaged_root = Path(__file__).resolve().parents[4]
-    configured_model_path = Path(os.getenv("SENTINEL_MODEL_PATH", str(packaged_root / "default_model.joblib")))
+    configured_model_path = Path(
+        os.getenv("SENTINEL_MODEL_PATH", str(packaged_root / "default_model.joblib"))
+    )
     try:
         configured_model_path.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(new_brain.save, configured_model_path)
@@ -1383,8 +1496,8 @@ async def global_flywheel_retrain(session: AsyncSession) -> dict:
         logger.warning("Failed to save default_model.joblib: %s", e)
 
     # Secure dataset export to S3 Data Lake (Parquet)
-    df["Is_High_Risk"] = y.iloc[:len(df)].values
-    df["Sample_Weight"] = sample_weights[:len(df)]
+    df["Is_High_Risk"] = y.iloc[: len(df)].values
+    df["Sample_Weight"] = sample_weights[: len(df)]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tmp:
         parquet_path = Path(tmp.name)

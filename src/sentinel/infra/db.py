@@ -4,18 +4,35 @@ import hashlib
 import hmac
 import os
 from collections.abc import AsyncGenerator
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, select, text, TypeDecorator
+from cryptography.fernet import Fernet
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    TypeDecorator,
+    select,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from cryptography.fernet import Fernet
-
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://sentinel:password@localhost:5432/sentinel",
 )
+
+
+def _production_mode_enabled() -> bool:
+    return os.getenv("SENTINEL_ENV", os.getenv("ENVIRONMENT", "dev")).strip().lower() in {
+        "prod",
+        "production",
+    }
 
 
 class Base(DeclarativeBase):
@@ -30,15 +47,22 @@ class EncryptedString(TypeDecorator):
         super().__init__(*args, **kwargs)
         key = os.getenv("SENTINEL_ENCRYPTION_KEY")
         default_key = b"U2VudGluZWxUcmFkaW5nRGVmYXVsdEtleTMyQnl0ZXM="
+        if _production_mode_enabled() and not key:
+            raise RuntimeError("SENTINEL_ENCRYPTION_KEY is required when SENTINEL_ENV=production.")
         if key:
             try:
                 import base64
+
                 decoded = base64.urlsafe_b64decode(key.encode())
                 if len(decoded) == 32:
                     self.fernet = Fernet(key.encode())
                 else:
+                    if _production_mode_enabled():
+                        raise RuntimeError("SENTINEL_ENCRYPTION_KEY must decode to 32 bytes.")
                     self.fernet = Fernet(default_key)
             except Exception:
+                if _production_mode_enabled():
+                    raise
                 self.fernet = Fernet(default_key)
         else:
             self.fernet = Fernet(default_key)
@@ -57,7 +81,6 @@ class EncryptedString(TypeDecorator):
             return value
 
 
-
 class User(Base):
     __tablename__ = "users"
 
@@ -71,22 +94,22 @@ class User(Base):
     is_baseline_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     maturity_state: Mapped[str] = mapped_column(String(32), default="maturity_0")
     enforce_mode: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
     # --- LEVEL PROGRESSION & GAMIFICATION ---
     model_level: Mapped[int] = mapped_column(Integer, default=1)
     feedback_score: Mapped[float] = mapped_column(Float, default=1.0)
     capital_protected: Mapped[float] = mapped_column(Float, default=0.0)
-    
+
     initial_parameters: Mapped[dict[str, float | str]] = mapped_column(JSON, default=dict)
     trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -104,12 +127,12 @@ class ApiCredential(Base):
     provisioning_state: Mapped[str] = mapped_column(String(64), default="queued")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -129,12 +152,12 @@ class OnboardingJob(Base):
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -156,7 +179,7 @@ class RiskAudit(Base):
     cached: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
 
@@ -180,13 +203,15 @@ class BehavioralLog(Base):
     risk_score: Mapped[float] = mapped_column(Float)
     size_multiplier: Mapped[float] = mapped_column(Float)
     is_anomaly: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
     # --- RLHF HUMAN LABELS ---
-    user_feedback_label: Mapped[str | None] = mapped_column(String(32), nullable=True) # "VALID_INTERCEPT" or "FALSE_POSITIVE"
-    
+    user_feedback_label: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )  # "VALID_INTERCEPT" or "FALSE_POSITIVE"
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
 
@@ -195,12 +220,14 @@ engine_kwargs = {
     "future": True,
 }
 if "postgresql" in DATABASE_URL:
-    engine_kwargs.update({
-        "pool_size": 20,
-        "max_overflow": 30,
-        "pool_timeout": 30,
-        "pool_recycle": 1800,
-    })
+    engine_kwargs.update(
+        {
+            "pool_size": 20,
+            "max_overflow": 30,
+            "pool_timeout": 30,
+            "pool_recycle": 1800,
+        }
+    )
 engine = create_async_engine(DATABASE_URL, **engine_kwargs)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 DB_AVAILABLE = True
@@ -212,7 +239,7 @@ _memory_behavioral_logs: list[BehavioralLog] = []
 
 
 def _sort_timestamp(value: datetime | None) -> datetime:
-    return value or datetime.min.replace(tzinfo=timezone.utc)
+    return value or datetime.min.replace(tzinfo=UTC)
 
 
 def _hash_api_key(raw_api_key: str) -> str:
@@ -231,31 +258,12 @@ async def init_db() -> None:
                 await connection.execute(text("PRAGMA journal_mode=WAL;"))
             await connection.run_sync(Base.metadata.create_all)
             await connection.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS maturity_state VARCHAR(32) DEFAULT 'maturity_0'")
-            )
-            await connection.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS enforce_mode BOOLEAN DEFAULT FALSE")
-            )
-            await connection.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS initial_parameters JSON DEFAULT '{}'::json")
-            )
-            await connection.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS model_level INTEGER DEFAULT 1")
-            )
-            await connection.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS feedback_score DOUBLE PRECISION DEFAULT 1.0")
-            )
-            await connection.execute(
-                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS capital_protected DOUBLE PRECISION DEFAULT 0.0")
-            )
-            await connection.execute(
-                text("ALTER TABLE behavioral_logs ADD COLUMN IF NOT EXISTS user_feedback_label VARCHAR(32) DEFAULT NULL")
-            )
-            await connection.execute(
-                text("ALTER TABLE behavioral_logs DROP COLUMN IF EXISTS user_id")
-            )
-            await connection.execute(
-                text("CREATE INDEX IF NOT EXISTS ix_behavioral_logs_user_hash_created ON behavioral_logs (user_hash, created_at)")
+                text(
+                    "CREATE INDEX IF NOT EXISTS"
+                    " ix_behavioral_logs_user_hash_created"
+                    " ON behavioral_logs"
+                    " (user_hash, created_at)"
+                )
             )
         DB_AVAILABLE = True
     except Exception:
@@ -351,7 +359,9 @@ async def get_api_credential(session: AsyncSession, user_id: str) -> ApiCredenti
         return _memory_api_credentials.get(user_id)
 
     try:
-        result = await session.execute(select(ApiCredential).where(ApiCredential.user_id == user_id))
+        result = await session.execute(
+            select(ApiCredential).where(ApiCredential.user_id == user_id)
+        )
         return result.scalar_one_or_none()
     except Exception:
         return _memory_api_credentials.get(user_id)
@@ -392,9 +402,7 @@ async def list_api_credentials(session: AsyncSession, limit: int = 200) -> list[
 
     try:
         result = await session.execute(
-            select(ApiCredential)
-            .order_by(ApiCredential.updated_at.desc())
-            .limit(limit)
+            select(ApiCredential).order_by(ApiCredential.updated_at.desc()).limit(limit)
         )
         return list(result.scalars().all())
     except Exception:
@@ -506,9 +514,7 @@ async def list_onboarding_jobs(session: AsyncSession, limit: int = 100) -> list[
 
     try:
         result = await session.execute(
-            select(OnboardingJob)
-            .order_by(OnboardingJob.created_at.desc())
-            .limit(limit)
+            select(OnboardingJob).order_by(OnboardingJob.created_at.desc()).limit(limit)
         )
         return list(result.scalars().all())
     except Exception:
@@ -533,9 +539,9 @@ async def update_onboarding_job(
         if hasattr(job, key):
             setattr(job, key, value)
 
-    job.updated_at = datetime.now(timezone.utc)
+    job.updated_at = datetime.now(UTC)
     if str(fields.get("state", "")) in {"ready", "failed", "blank_baseline"}:
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
 
     if not DB_AVAILABLE:
         _memory_jobs[job_id] = job
@@ -677,12 +683,13 @@ async def list_behavioral_logs_for_export(
     export_date: date,
     limit: int = 100_000,
 ) -> list[BehavioralLog]:
-    start = datetime.combine(export_date, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(export_date, time.max, tzinfo=timezone.utc)
+    start = datetime.combine(export_date, time.min, tzinfo=UTC)
+    end = datetime.combine(export_date, time.max, tzinfo=UTC)
 
     if not DB_AVAILABLE:
         logs = [
-            log for log in _memory_behavioral_logs
+            log
+            for log in _memory_behavioral_logs
             if start <= _sort_timestamp(getattr(log, "created_at", None)) <= end
         ]
         return sorted(logs, key=lambda log: _sort_timestamp(log.created_at))[:limit]
@@ -698,7 +705,8 @@ async def list_behavioral_logs_for_export(
         return list(result.scalars().all())
     except Exception:
         logs = [
-            log for log in _memory_behavioral_logs
+            log
+            for log in _memory_behavioral_logs
             if start <= _sort_timestamp(getattr(log, "created_at", None)) <= end
         ]
         return sorted(logs, key=lambda log: _sort_timestamp(log.created_at))[:limit]
@@ -776,11 +784,7 @@ async def list_users(session: AsyncSession, limit: int = 200) -> list[User]:
         return users[:limit]
 
     try:
-        result = await session.execute(
-            select(User)
-            .order_by(User.updated_at.desc())
-            .limit(limit)
-        )
+        result = await session.execute(select(User).order_by(User.updated_at.desc()).limit(limit))
         return list(result.scalars().all())
     except Exception:
         users = sorted(

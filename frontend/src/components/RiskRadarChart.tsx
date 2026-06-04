@@ -21,32 +21,37 @@ export default function RiskRadarChart({
   riskThreshold,
   losingStreakBreached12h = false,
 }: RiskRadarChartProps) {
+  const metricValue = (key: keyof RiskAuditRecord): number => {
+    const value = latestAssessment?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  };
+
   // Map current telemetry metrics to normalized radar dimensions (0 to 100 scale)
   const normalizedData = [
     {
       metric: "Drawdown",
-      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).drawdown_state * 300 || 0) : 0,
+      "Current Risk": Math.min(100, metricValue("drawdown_state") * 300),
       "Safe Limit": 30, // 10% drawdown threshold
     },
     {
       metric: "Losing Streak",
-      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).losing_streak * 20 || 0) : 0,
+      "Current Risk": Math.min(100, metricValue("losing_streak") * 20),
       "Safe Limit": 60, // 3 consecutive losses
     },
     {
       metric: "Time Pressure",
       // Revenge timer: less time elapsed = higher pressure
-      "Current Risk": latestAssessment ? Math.max(0, 100 - ((latestAssessment as any).revenge_timer / 10 || 0)) : 0,
+      "Current Risk": Math.max(0, 100 - metricValue("revenge_timer") / 10),
       "Safe Limit": 50, // 500 seconds cooldown
     },
     {
       metric: "Lot Deviation",
-      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).lot_deviation * 25 || 0) : 0,
+      "Current Risk": Math.min(100, metricValue("lot_deviation") * 25),
       "Safe Limit": 50, // 2 standard deviations
     },
     {
       metric: "Vol Deviation",
-      "Current Risk": latestAssessment ? Math.min(100, (latestAssessment as any).realized_vol_20 * 1500 || 0) : 0,
+      "Current Risk": Math.min(100, metricValue("realized_vol_20") * 1500),
       "Safe Limit": 40,
     }
   ];

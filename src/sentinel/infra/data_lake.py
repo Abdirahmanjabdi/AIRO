@@ -74,10 +74,7 @@ class BehavioralDataLakeExporter:
             ]
         )
 
-        key = (
-            f"{self.prefix}/dt={target_date.isoformat()}/"
-            f"behavioral-{uuid.uuid4().hex}.parquet"
-        )
+        key = f"{self.prefix}/dt={target_date.isoformat()}/behavioral-{uuid.uuid4().hex}.parquet"
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as handle:
             path = Path(handle.name)

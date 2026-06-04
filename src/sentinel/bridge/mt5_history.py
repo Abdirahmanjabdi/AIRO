@@ -4,7 +4,7 @@ import asyncio
 import importlib
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -34,16 +34,14 @@ class MT5HistoryBridge:
     """Bridge-side MT5 history collector and onboarding callback client."""
 
     def __init__(self, api_base_url: str | None = None) -> None:
-        self.api_base_url = (api_base_url or os.getenv("BRAIN_API_URL", "http://localhost:8000")).rstrip(
-            "/"
-        )
+        self.api_base_url = (
+            api_base_url or os.getenv("BRAIN_API_URL", "http://localhost:8000")
+        ).rstrip("/")
         self.lookback_days = int(os.getenv("MT5_HISTORY_LOOKBACK_DAYS", "180"))
 
     def _require_mt5(self) -> Any:
         if mt5 is None:
-            raise RuntimeError(
-                "MetaTrader5 Python package is required for MT5 history collection."
-            )
+            raise RuntimeError("MetaTrader5 Python package is required for MT5 history collection.")
         return mt5
 
     def verify_credentials(
@@ -66,11 +64,7 @@ class MT5HistoryBridge:
         if os.path.exists(portable_path) and os.path.getsize(portable_path) > 1024 * 1024:
             logger.info("Initializing MT5 in portable mode at %s", portable_path)
             initialized = mt5_module.initialize(
-                path=portable_path,
-                login=login,
-                server=server,
-                password=password,
-                portable=True
+                path=portable_path, login=login, server=server, password=password, portable=True
             )
         else:
             logger.info("Initializing MT5 in standard mode (portable path absent or dummy mock)")
@@ -107,7 +101,7 @@ class MT5HistoryBridge:
 
     def fetch_recent_trades(self, limit: int = 100) -> list[HistoricalTrade]:
         mt5_module = self._require_mt5()
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - timedelta(days=self.lookback_days)
         deals = mt5_module.history_deals_get(start, end)
         if deals is None:
@@ -137,8 +131,8 @@ class MT5HistoryBridge:
 
             open_deal = ordered[0]
             close_deal = ordered[-1]
-            open_time = datetime.fromtimestamp(int(getattr(open_deal, "time")), tz=timezone.utc)
-            close_time = datetime.fromtimestamp(int(getattr(close_deal, "time")), tz=timezone.utc)
+            open_time = datetime.fromtimestamp(int(open_deal.time), tz=UTC)
+            close_time = datetime.fromtimestamp(int(close_deal.time), tz=UTC)
             if close_time <= open_time:
                 continue
 
@@ -180,7 +174,9 @@ class MT5HistoryBridge:
         trades: list[HistoricalTrade],
     ) -> None:
         submission = OnboardingDataSubmission(job_id=job_id, user_id=user_id, trades=trades)
-        async with httpx.AsyncClient(base_url=self.api_base_url, timeout=httpx.Timeout(30.0)) as client:
+        async with httpx.AsyncClient(
+            base_url=self.api_base_url, timeout=httpx.Timeout(30.0)
+        ) as client:
             response = await client.post(
                 "/v1/onboard/data",
                 json=submission.model_dump(mode="json"),
@@ -195,19 +191,28 @@ class MT5HistoryBridge:
     ) -> None:
         """Mark the onboarding job as failed by posting a failure state to the Brain API."""
         try:
-            async with httpx.AsyncClient(base_url=self.api_base_url, timeout=httpx.Timeout(10.0)) as client:
+            async with httpx.AsyncClient(
+                base_url=self.api_base_url, timeout=httpx.Timeout(10.0)
+            ) as client:
                 response = await client.post(
                     "/v1/onboard/fail",
                     json={"job_id": job_id, "user_id": user_id, "error": error_message},
                 )
                 if response.status_code == 404:
-                    # Endpoint doesn't exist — fall back to submitting empty trades which will complete as blank_baseline
-                    logger.warning("No /v1/onboard/fail endpoint. Submitting empty history as fallback.")
+                    # Endpoint doesn't exist — fall back to submitting
+                    # empty trades which will complete as blank_baseline
+                    logger.warning(
+                        "No /v1/onboard/fail endpoint. Submitting empty history as fallback."
+                    )
                     await self.post_onboarding_data(job_id, user_id, [])
                 else:
                     response.raise_for_status()
         except Exception as exc:
-            logger.error("Could not post failure for job %s: %s — submitting empty trades as fallback", job_id, exc)
+            logger.error(
+                "Could not post failure for job %s: %s — submitting empty trades as fallback",
+                job_id,
+                exc,
+            )
             try:
                 await self.post_onboarding_data(job_id, user_id, [])
             except Exception:
@@ -252,7 +257,7 @@ class MT5HistoryBridge:
                     timeout=15.0,
                 )
                 initialized = True
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "MT5 credential verification timed out after 15s for job %s (user %s). "
                     "Submitting empty history — bootstrap onboarding will proceed.",
@@ -286,4 +291,3 @@ class MT5HistoryBridge:
                     await asyncio.to_thread(mt5.shutdown)
                 except Exception:
                     logger.exception("Failed to shut down MT5 cleanly")
-

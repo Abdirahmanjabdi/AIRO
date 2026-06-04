@@ -43,7 +43,7 @@ describe("presentation helpers", () => {
 
   it("surfaces the best available explanation for the latest decision", () => {
     expect(latestTopReason(null)).toBe("No telemetry has been evaluated yet.");
-    expect(latestTopReason(sampleAudit)).toBe("losing_streak");
+    expect(latestTopReason(sampleAudit)).toBe("Consecutive Loss Streak");
   });
 
   it("maps decisions to the intended badge styles", () => {

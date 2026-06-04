@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.brain.feature_engine import engineer_features
 from sentinel.brain.risk_engine import SentinelBrain
-from sentinel.infra.db import AsyncSessionLocal, get_db, get_user, init_db, validate_api_key
 from sentinel.infra.data_lake import data_lake_exporter
+from sentinel.infra.db import AsyncSessionLocal, get_db, get_user, init_db, validate_api_key
 from sentinel.infra.redis_cache import cache_manager
 from sentinel.infra.s3 import model_store
 
@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 _default_brain: SentinelBrain | None = None
 _user_brain_cache: dict[str, tuple[str, SentinelBrain]] = {}
 _data_lake_task: asyncio.Task[None] | None = None
+
+
+def _production_mode_enabled() -> bool:
+    return os.getenv("SENTINEL_ENV", os.getenv("ENVIRONMENT", "dev")).strip().lower() in {
+        "prod",
+        "production",
+    }
 
 
 def _existing_path(candidates: list[Path]) -> Path | None:
@@ -53,7 +60,11 @@ async def _data_lake_export_loop() -> None:
             async with AsyncSessionLocal() as session:
                 key = await data_lake_exporter.export_day(session)
             if key is not None:
-                logger.info("Behavioral data lake export complete: s3://%s/%s", data_lake_exporter.bucket, key)
+                logger.info(
+                    "Behavioral data lake export complete: s3://%s/%s",
+                    data_lake_exporter.bucket,
+                    key,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -96,8 +107,11 @@ def load_default_model() -> None:
         ]
     )
     if csv_path is None:
-        logger.warning("Bootstrap CSV missing at %s. Default brain will stay untrained.", csv_path)
-        _default_brain = SentinelBrain()
+        logger.warning(
+            "Bootstrap CSV missing at %s. Training deterministic bootstrap brain.",
+            csv_path,
+        )
+        _default_brain = _train_bootstrap_default_brain()
         return
 
     logger.info("Training default brain from %s", csv_path)
@@ -115,11 +129,70 @@ def load_default_model() -> None:
             _default_brain.save(fallback_path)
             logger.info("Saved default brain fallback to %s", fallback_path)
         except Exception:
-            logger.warning("Default brain trained but could not be persisted to disk.", exc_info=True)
+            logger.warning(
+                "Default brain trained but could not be persisted to disk.", exc_info=True
+            )
+
+
+def _train_bootstrap_default_brain() -> SentinelBrain:
+    """
+    Train a minimal deterministic model for readiness and cold-start audit mode.
+
+    Production deployments should provide a real default model or bootstrap CSV, but the
+    service must not boot unready simply because the global artifact is absent. User-specific
+    mature scoring still loads per-user models from S3/MinIO when available.
+    """
+    rows: list[dict[str, float | int]] = []
+    for idx in range(64):
+        safe_lot = 0.08 + (idx % 5) * 0.01
+        rows.append(
+            {
+                "Hour_Decimal": float((idx % 12) + 7),
+                "Losing_Streak": float(idx % 2),
+                "Drawdown_State": float((idx % 4) * 0.02),
+                "Lot_Deviation": float((idx % 3) * 0.15),
+                "Revenge_Timer": float(45 + (idx % 10) * 8),
+                "Lots": safe_lot,
+                "RR Ratio": 1.4 + (idx % 6) * 0.1,
+                "Realized_Vol_20": 0.0004 + (idx % 5) * 0.0001,
+                "Trend_Momentum": 0.0003 + (idx % 4) * 0.0001,
+                "Is_High_Risk": 0,
+            }
+        )
+
+    for idx in range(24):
+        rows.append(
+            {
+                "Hour_Decimal": float((idx % 8) + 13),
+                "Losing_Streak": float(3 + idx % 4),
+                "Drawdown_State": 0.18 + (idx % 6) * 0.04,
+                "Lot_Deviation": 2.0 + (idx % 5) * 0.45,
+                "Revenge_Timer": float(1 + idx % 8),
+                "Lots": 0.25 + (idx % 4) * 0.08,
+                "RR Ratio": 0.5 + (idx % 4) * 0.1,
+                "Realized_Vol_20": 0.003 + (idx % 5) * 0.0004,
+                "Trend_Momentum": 0.002 + (idx % 4) * 0.0003,
+                "Is_High_Risk": 1,
+            }
+        )
+
+    brain = SentinelBrain()
+    brain.train(pd.DataFrame(rows))
+    return brain
 
 
 async def initialize_runtime() -> None:
     global _data_lake_task
+    if _production_mode_enabled() and os.getenv(
+        "SENTINEL_AUTH_DISABLED", "false"
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        raise RuntimeError("SENTINEL_AUTH_DISABLED cannot be enabled in production.")
+
     try:
         await init_db()
     except Exception:
@@ -131,10 +204,12 @@ async def initialize_runtime() -> None:
     try:
         if not await cache_manager.ping():
             from sentinel.infra.redis_cache import InMemoryRedis
+
             logger.warning("Redis ping failed. Swapping to InMemoryRedis fallback.")
             cache_manager.r = InMemoryRedis()
     except Exception:
         from sentinel.infra.redis_cache import InMemoryRedis
+
         logger.warning("Redis connectivity check failed. Swapping to InMemoryRedis fallback.")
         cache_manager.r = InMemoryRedis()
 
@@ -201,25 +276,28 @@ async def get_cache_manager() -> object:
 
 
 import base64
-import json
 import hashlib
+import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from cryptography.fernet import Fernet
 
-# A stable Fernet key derived from a secret, or a newly generated one if not set
+# A stable Fernet key derived from a secret. Local/dev keeps a fallback for tests only.
+if _production_mode_enabled() and not os.getenv("SENTINEL_SECRET_KEY"):
+    raise RuntimeError("SENTINEL_SECRET_KEY is required when SENTINEL_ENV=production.")
+
 SECRET_KEY = os.getenv("SENTINEL_SECRET_KEY", "sentinel_fallback_secret_32_bytes_long_!!")
 FERNET_KEY = base64.urlsafe_b64encode(hashlib.sha256(SECRET_KEY.encode()).digest())
 cipher_suite = Fernet(FERNET_KEY)
 
+
 def create_session_token(user_id: str) -> str:
     """Generates an encrypted, signed session token containing the user identity and a timestamp."""
-    payload = {
-        "user_id": user_id,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    payload = {"user_id": user_id, "timestamp": datetime.now(UTC).isoformat()}
     encrypted = cipher_suite.encrypt(json.dumps(payload).encode())
     return encrypted.decode()
+
 
 def verify_session_token(token: str) -> str:
     """Decrypts and verifies token signature and expiration (24h)."""
@@ -227,19 +305,18 @@ def verify_session_token(token: str) -> str:
         decrypted = cipher_suite.decrypt(token.encode())
         payload = json.loads(decrypted.decode())
         created_at = datetime.fromisoformat(payload["timestamp"])
-        if (datetime.now(timezone.utc) - created_at).total_seconds() > 86400:
+        if (datetime.now(UTC) - created_at).total_seconds() > 86400:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session token expired."
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Session token expired."
             )
         return str(payload["user_id"])
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid session token."
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session token."
         ) from exc
+
 
 async def verify_tenant_isolation(request: Request, user_id: str) -> None:
     """Enforces strict tenant row-level checking to prevent IDOR/BOLA attacks."""
@@ -250,13 +327,14 @@ async def verify_tenant_isolation(request: Request, user_id: str) -> None:
     if not auth_user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session context missing user identity."
+            detail="Session context missing user identity.",
         )
     if auth_user_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access Denied: Tenant Isolation violation (BOLA protected)."
+            detail="Access Denied: Tenant Isolation violation (BOLA protected).",
         )
+
 
 async def rate_limiter(request: Request) -> None:
     """Sliding-window rate limiter restricting /analyze and /autopsy to 10 requests per second."""
@@ -273,13 +351,14 @@ async def rate_limiter(request: Request) -> None:
         if count > 10:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded. Maximum 10 requests per second allowed per user."
+                detail="Rate limit exceeded. Maximum 10 requests per second allowed per user.",
             )
     except HTTPException:
         raise
     except Exception:
         # Fallback to allow requests if cache manager is down
         pass
+
 
 async def require_api_key(
     request: Request,
@@ -299,7 +378,9 @@ async def require_api_key(
         ("POST", "/v1/credentials"),
         ("POST", "/v1/onboard"),
     }
-    if (request.method, request.url.path) in bootstrap_routes or request.url.path.startswith("/v1/onboard"):
+    if (request.method, request.url.path) in bootstrap_routes or request.url.path.startswith(
+        "/v1/onboard"
+    ):
         return
 
     if not x_api_key:
@@ -325,7 +406,9 @@ async def require_api_key(
 
     # Populate request.state.user_id with the corresponding key owner user_id
     from sqlalchemy import select
+
     from sentinel.infra.db import ApiCredential
+
     api_key_hash = hashlib.sha256(x_api_key.encode("utf-8")).hexdigest()
     try:
         result = await session.execute(

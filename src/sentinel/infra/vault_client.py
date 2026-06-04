@@ -79,7 +79,9 @@ class VaultManager:
             self.client.token = os.getenv("VAULT_TOKEN")
 
         if not self.client.is_authenticated():
-            logger.warning("Vault is not authenticated. Falling back to in-memory credential store.")
+            logger.warning(
+                "Vault is not authenticated. Falling back to in-memory credential store."
+            )
             self.client = None
 
     def is_authenticated(self) -> bool:
@@ -110,7 +112,8 @@ class VaultManager:
     def _assert_production_vault(self, operation: str) -> None:
         if self.require_vault_enabled() and self.client is None:
             raise RuntimeError(
-                f"Vault is required for {operation}, but no authenticated Vault client is available."
+                f"Vault is required for {operation}, "
+                "but no authenticated Vault client is available."
             )
 
     def _ensure_secret_engines(self) -> None:
@@ -155,7 +158,9 @@ class VaultManager:
 
         if self._fallback_cipher is not None:
             return self._fallback_cipher.encrypt(password_readonly.encode("utf-8")).decode("utf-8")
-        return "memory:v1:" + base64.urlsafe_b64encode(password_readonly.encode("utf-8")).decode("utf-8")
+        return "memory:v1:" + base64.urlsafe_b64encode(password_readonly.encode("utf-8")).decode(
+            "utf-8"
+        )
 
     def _decrypt_password(self, ciphertext: str) -> str:
         if self.client is not None:
@@ -189,15 +194,23 @@ class VaultManager:
         }
         if self.client is None:
             self._memory_store[user_id] = payload
-            import sqlite3
             import json
+            import sqlite3
+
             # Anchor to project root (4 levels up from sentinel/infra/vault_client.py)
-            db_path = str(Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db")
+            db_path = str(
+                Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db"
+            )
             conn = sqlite3.connect(db_path)
             try:
                 with conn:
-                    conn.execute("CREATE TABLE IF NOT EXISTS vault_kv (key TEXT PRIMARY KEY, value TEXT)")
-                    conn.execute("INSERT OR REPLACE INTO vault_kv (key, value) VALUES (?, ?)", (user_id, json.dumps(payload)))
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS vault_kv (key TEXT PRIMARY KEY, value TEXT)"
+                    )
+                    conn.execute(
+                        "INSERT OR REPLACE INTO vault_kv (key, value) VALUES (?, ?)",
+                        (user_id, json.dumps(payload)),
+                    )
             except Exception:
                 logger.exception("Failed to write mock credentials to SQLite fallback")
             finally:
@@ -215,10 +228,13 @@ class VaultManager:
         if self.client is None:
             record = self._memory_store.get(user_id)
             if record is None:
-                import sqlite3
                 import json
+                import sqlite3
+
                 # Anchor to project root (4 levels up from sentinel/infra/vault_client.py)
-                db_path = str(Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db")
+                db_path = str(
+                    Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db"
+                )
                 conn = sqlite3.connect(db_path)
                 try:
                     cursor = conn.execute("SELECT value FROM vault_kv WHERE key = ?", (user_id,))

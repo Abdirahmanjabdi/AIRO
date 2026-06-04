@@ -1,7 +1,6 @@
 # =============================================================================
 # Sentinel Brain API — Production Dockerfile
 # Multi-stage build, Python 3.12, non-root user
-# Ref: ARCHITECTURE.md §2
 # =============================================================================
 
 # --- Stage 1: Builder ---
@@ -9,46 +8,41 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Install build deps
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Copy project files
 COPY pyproject.toml ./
 COPY src/ ./src/
 
-# Build wheel
 RUN pip wheel --no-cache-dir --wheel-dir /build/wheels .
 
 # --- Stage 2: Runtime ---
 FROM python:3.12-slim AS runtime
 
-# Security: non-root user
-RUN groupadd -r sentinel && useradd -r -g sentinel sentinel
+RUN groupadd -r sentinel && useradd -r -g sentinel -m sentinel
 
 WORKDIR /app
 
-# Install from pre-built wheels
 COPY --from=builder /build/wheels /tmp/wheels
 RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
-# Copy source (needed for CSV bootstrap + package)
 COPY src/ ./src/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
+COPY infra/docker/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
-# Environment
+RUN mkdir -p /app/data && chown -R sentinel:sentinel /app
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    SENTINEL_MODEL_PATH=/app/default_model.joblib
+    SENTINEL_MODEL_PATH=/app/default_model.joblib \
+    ANYIO_MAX_THREADS=50
 
-# Switch to non-root
 USER sentinel
 
-# Expose API port
 EXPOSE 8000
 
-# Health check (K8s also uses /healthz but this is for Docker)
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c 'import httpx; r = httpx.get("http://localhost:8000/healthz"); exit(0 if r.status_code == 200 else 1)'
 
-# Scale workers based on cores and increase the threadpool for sklearn inference
-ENV ANYIO_MAX_THREADS=50
-CMD ["uvicorn", "sentinel.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--limit-concurrency", "1000"]
+ENTRYPOINT ["./entrypoint.sh"]

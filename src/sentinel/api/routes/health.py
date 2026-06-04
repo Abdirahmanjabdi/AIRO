@@ -40,7 +40,12 @@ async def readiness() -> ReadinessResponse:
     vault_required = vault_manager.require_vault_enabled()
     vault_connected = vault_manager.is_healthy()
 
-    all_ready = model_loaded and redis_connected and db_connected and (vault_connected or not vault_required)
+    all_ready = (
+        model_loaded
+        and redis_connected
+        and db_connected
+        and (vault_connected or not vault_required)
+    )
 
     details: dict[str, str] = {}
     if not model_loaded:

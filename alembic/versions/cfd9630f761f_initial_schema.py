@@ -60,6 +60,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_behavioral_logs_audit_id'), 'behavioral_logs', ['audit_id'], unique=False)
     op.create_index(op.f('ix_behavioral_logs_user_hash'), 'behavioral_logs', ['user_hash'], unique=False)
+    op.create_index('ix_behavioral_logs_user_hash_created', 'behavioral_logs', ['user_hash', 'created_at'], unique=False)
     op.create_table('onboarding_jobs',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('job_id', sa.String(length=128), nullable=False),
@@ -133,6 +134,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_onboarding_jobs_job_id'), table_name='onboarding_jobs')
     op.drop_table('onboarding_jobs')
     op.drop_index(op.f('ix_behavioral_logs_user_hash'), table_name='behavioral_logs')
+    op.drop_index('ix_behavioral_logs_user_hash_created', table_name='behavioral_logs')
     op.drop_index(op.f('ix_behavioral_logs_audit_id'), table_name='behavioral_logs')
     op.drop_table('behavioral_logs')
     op.drop_index(op.f('ix_api_credentials_user_id'), table_name='api_credentials')

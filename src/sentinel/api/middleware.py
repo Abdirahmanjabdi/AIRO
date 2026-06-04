@@ -8,9 +8,9 @@ Ref: AI_CONTRACT.md §1.3 (circuit-breaker logging with correlation IDs)
 
 from __future__ import annotations
 
-import uuid
 import logging
 import time
+import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request

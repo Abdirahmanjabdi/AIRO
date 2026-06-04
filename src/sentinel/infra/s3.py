@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from pathlib import Path
-
-import logging
 
 logger = logging.getLogger(__name__)
 

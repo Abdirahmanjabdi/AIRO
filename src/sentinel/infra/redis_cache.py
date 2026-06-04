@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
-import asyncio
 from typing import Any
 
 try:
@@ -20,16 +20,17 @@ import sqlite3
 import time
 from pathlib import Path
 
+
 class InMemoryRedis:
     """SQLite-backed shared multiprocess KV/Queue store for local zero-dependency runs."""
+
     # Anchor the db to the project root (4 levels up from sentinel/infra/redis_cache.py)
     # so the path is identical regardless of which directory each process was launched from.
-    _DB_PATH: str = str(
-        (Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db")
-    )
+    _DB_PATH: str = str(Path(__file__).resolve().parent.parent.parent.parent / "redis_fallback.db")
 
     def __init__(self) -> None:
         import logging
+
         self.logger = logging.getLogger("InMemoryRedis")
         self.db_path = self._DB_PATH
         self.logger.info("Initializing SQLite InMemoryRedis at %s", self.db_path)
@@ -63,13 +64,16 @@ class InMemoryRedis:
         conn = sqlite3.connect(self.db_path)
         try:
             with conn:
-                cursor = conn.execute("SELECT value FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)", (key, time.time()))
+                cursor = conn.execute(
+                    "SELECT value FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)",
+                    (key, time.time()),
+                )
                 row = cursor.fetchone()
-                if row:
-                    new_val = int(row[0]) + 1
-                else:
-                    new_val = 1
-                conn.execute("INSERT OR REPLACE INTO kv (key, value, expire_at) VALUES (?, ?, ?)", (key, str(new_val), None))
+                new_val = int(row[0]) + 1 if row else 1
+                conn.execute(
+                    "INSERT OR REPLACE INTO kv (key, value, expire_at) VALUES (?, ?, ?)",
+                    (key, str(new_val), None),
+                )
                 return new_val
         except Exception as e:
             self.logger.exception("Error in incr for key %s: %s", key, e)
@@ -111,10 +115,16 @@ class InMemoryRedis:
         try:
             with conn:
                 if nx:
-                    cursor = conn.execute("SELECT 1 FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)", (key, time.time()))
+                    cursor = conn.execute(
+                        "SELECT 1 FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)",
+                        (key, time.time()),
+                    )
                     if cursor.fetchone() is not None:
                         return False
-                conn.execute("INSERT OR REPLACE INTO kv (key, value, expire_at) VALUES (?, ?, ?)", (key, value, expire_at))
+                conn.execute(
+                    "INSERT OR REPLACE INTO kv (key, value, expire_at) VALUES (?, ?, ?)",
+                    (key, value, expire_at),
+                )
                 return True
         except Exception as e:
             self.logger.exception("Error in set for key %s: %s", key, e)
@@ -125,7 +135,10 @@ class InMemoryRedis:
     async def get(self, key: str) -> str | None:
         conn = sqlite3.connect(self.db_path)
         try:
-            cursor = conn.execute("SELECT value FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)", (key, time.time()))
+            cursor = conn.execute(
+                "SELECT value FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)",
+                (key, time.time()),
+            )
             row = cursor.fetchone()
             return row[0] if row else None
         except Exception as e:
@@ -137,7 +150,10 @@ class InMemoryRedis:
     async def exists(self, key: str) -> int:
         conn = sqlite3.connect(self.db_path)
         try:
-            cursor = conn.execute("SELECT 1 FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)", (key, time.time()))
+            cursor = conn.execute(
+                "SELECT 1 FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)",
+                (key, time.time()),
+            )
             return 1 if cursor.fetchone() else 0
         except Exception as e:
             self.logger.exception("Error in exists for key %s: %s", key, e)
@@ -148,7 +164,10 @@ class InMemoryRedis:
     async def ttl(self, key: str) -> int:
         conn = sqlite3.connect(self.db_path)
         try:
-            cursor = conn.execute("SELECT expire_at FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)", (key, time.time()))
+            cursor = conn.execute(
+                "SELECT expire_at FROM kv WHERE key = ? AND (expire_at IS NULL OR expire_at > ?)",
+                (key, time.time()),
+            )
             row = cursor.fetchone()
             if not row:
                 return -2
@@ -177,7 +196,9 @@ class InMemoryRedis:
             conn = sqlite3.connect(self.db_path)
             try:
                 with conn:
-                    cursor = conn.execute("SELECT id, value FROM queue WHERE key = ? ORDER BY id ASC LIMIT 1", (key,))
+                    cursor = conn.execute(
+                        "SELECT id, value FROM queue WHERE key = ? ORDER BY id ASC LIMIT 1", (key,)
+                    )
                     row = cursor.fetchone()
                     if row:
                         row_id, value = row
@@ -193,11 +214,12 @@ class InMemoryRedis:
 
 if ConnectionPool is not None and Redis is not None:
     pool = ConnectionPool.from_url(
-        REDIS_URL, 
+        REDIS_URL,
         decode_responses=True,
-        socket_connect_timeout=0.5,
-        socket_timeout=0.5,
-        max_connections=100
+        socket_connect_timeout=2.0,
+        socket_timeout=2.0,
+        max_connections=100,
+        retry_on_timeout=True,
     )
     redis_client: Any = Redis(connection_pool=pool)
 else:
