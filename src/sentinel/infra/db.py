@@ -6,9 +6,10 @@ import os
 from collections.abc import AsyncGenerator
 from datetime import date, datetime, time, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, select, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, select, text, TypeDecorator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from cryptography.fernet import Fernet
 
 
 DATABASE_URL = os.getenv(
@@ -19,6 +20,42 @@ DATABASE_URL = os.getenv(
 
 class Base(DeclarativeBase):
     pass
+
+
+class EncryptedString(TypeDecorator):
+    impl = String
+    cache_ok = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        key = os.getenv("SENTINEL_ENCRYPTION_KEY")
+        default_key = b"U2VudGluZWxUcmFkaW5nRGVmYXVsdEtleTMyQnl0ZXM="
+        if key:
+            try:
+                import base64
+                decoded = base64.urlsafe_b64decode(key.encode())
+                if len(decoded) == 32:
+                    self.fernet = Fernet(key.encode())
+                else:
+                    self.fernet = Fernet(default_key)
+            except Exception:
+                self.fernet = Fernet(default_key)
+        else:
+            self.fernet = Fernet(default_key)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return self.fernet.encrypt(value.encode()).decode()
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return self.fernet.decrypt(value.encode()).decode()
+        except Exception:
+            return value
+
 
 
 class User(Base):
@@ -58,7 +95,7 @@ class ApiCredential(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    email: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(EncryptedString(255))
     plan: Mapped[str] = mapped_column(String(128))
     api_key_hash: Mapped[str] = mapped_column(String(128))
     api_key_last4: Mapped[str] = mapped_column(String(4))
