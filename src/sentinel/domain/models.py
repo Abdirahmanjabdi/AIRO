@@ -8,14 +8,14 @@ bridge, and persistence boundaries.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class Decision(str, Enum):
+class Decision(StrEnum):
     """Risk engine output decision."""
 
     ALLOW = "ALLOW"
@@ -23,7 +23,7 @@ class Decision(str, Enum):
     REDUCE_SIZE = "REDUCE_SIZE"
 
 
-class OnboardingState(str, Enum):
+class OnboardingState(StrEnum):
     """Async onboarding job lifecycle."""
 
     PENDING = "pending"
@@ -34,12 +34,57 @@ class OnboardingState(str, Enum):
     FAILED = "failed"
 
 
-class RiskMode(str, Enum):
+class RiskMode(StrEnum):
     """Brain operating mode for audit trail and UI state."""
 
     NORMAL = "normal"
     RISK_OFF = "risk_off"
     BASELINE_PENDING = "baseline_pending"
+    SHADOW = "shadow"
+    BOOTSTRAP = "bootstrap"
+
+
+class UserMaturity(StrEnum):
+    """Cold-start maturity lane for a user's behavioral model."""
+
+    MATURITY_0 = "maturity_0"
+    MATURITY_1 = "maturity_1"
+    MATURITY_2 = "maturity_2"
+
+
+class TradingStyle(StrEnum):
+    """Self-declared trading cadence captured during onboarding."""
+
+    SCALPER = "scalper"
+    INTRADAY = "intraday"
+    SWING = "swing"
+
+
+class TiltResponse(StrEnum):
+    """Self-declared behavior after a loss."""
+
+    WAIT_FOR_SETUP = "wait_for_setup"
+    MIXED = "mixed"
+    IMMEDIATE_REENTRY = "immediate_reentry"
+
+
+class UserInitialParameters(BaseModel):
+    """Risk DNA survey values used before enough trade history exists."""
+
+    max_drawdown_pct: float = Field(default=3.0, ge=0.1, le=25.0)
+    primary_instrument: str = Field(default="FX", min_length=1, max_length=32)
+    trading_style: TradingStyle = Field(default=TradingStyle.INTRADAY)
+    typical_daily_trades: int = Field(default=8, ge=1, le=500)
+    typical_lot_size: float = Field(default=1.0, gt=0.0, le=500.0)
+    average_win_hold_minutes: float = Field(default=60.0, gt=0.0, le=10080.0)
+    tilt_response: TiltResponse = Field(default=TiltResponse.WAIT_FOR_SETUP)
+    loss_review_threshold: int = Field(default=3, ge=1, le=20)
+    max_lot_multiplier: float = Field(default=2.0, ge=1.0, le=10.0)
+
+    @field_validator("primary_instrument")
+    @classmethod
+    def normalize_instrument(cls, value: str) -> str:
+        return value.strip().upper()
 
 
 class TradeContext(BaseModel):
@@ -58,6 +103,7 @@ class TradeContext(BaseModel):
     rr_ratio: float = Field(..., gt=0.0)
     realized_vol_20: float = Field(default=0.0, ge=0.0)
     trend_momentum: float = Field(default=0.0, ge=0.0)
+    position_id: int | None = None
 
     @field_validator("hour_decimal")
     @classmethod
@@ -84,6 +130,9 @@ class RiskAssessment(BaseModel):
     explanation: list[FeatureContribution] = Field(default_factory=list)
     latency_ms: float = Field(..., ge=0.0)
     mode: RiskMode = Field(default=RiskMode.NORMAL)
+    maturity_state: UserMaturity | None = None
+    shadow_mode: bool = False
+    losing_streak_breached_12h: bool = False
 
 
 class UserBaseline(BaseModel):
@@ -98,6 +147,10 @@ class UserBaseline(BaseModel):
     is_baseline_ready: bool = False
     risk_threshold: float = 0.6537
     contamination: float = 0.0399
+    maturity_state: UserMaturity = UserMaturity.MATURITY_0
+    enforce_mode: bool = False
+    model_level: int = 1
+    initial_parameters: UserInitialParameters = Field(default_factory=UserInitialParameters)
 
     @field_validator("is_baseline_ready")
     @classmethod
@@ -105,9 +158,7 @@ class UserBaseline(BaseModel):
         data = getattr(info, "data", {})
         trade_count = data.get("trade_count", 0)
         if value and trade_count < 1:
-            raise ValueError(
-                f"Cannot be baseline_ready with only {trade_count} trades (min 1)"
-            )
+            raise ValueError(f"Cannot be baseline_ready with only {trade_count} trades")
         return value
 
 
@@ -117,7 +168,8 @@ class OnboardingRequest(BaseModel):
     user_id: str = Field(..., min_length=1)
     broker_server: str = Field(..., min_length=1)
     account_id: str = Field(..., min_length=1)
-    min_trades: int = Field(default=10, ge=1, le=500)
+    min_trades: int = Field(default=20, ge=1, le=500)
+    initial_parameters: UserInitialParameters = Field(default_factory=UserInitialParameters)
 
 
 class CredentialRequest(BaseModel):
@@ -166,8 +218,10 @@ class OnboardingStatus(BaseModel):
     trade_count: int = Field(default=0, ge=0)
     message: str = Field(default="Job queued")
     model_s3_key: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
+    api_key: str | None = None
+    api_key_last4: str | None = None
 
 
 class RiskAuditRecord(BaseModel):
@@ -185,7 +239,8 @@ class RiskAuditRecord(BaseModel):
     explanation: list[FeatureContribution] = Field(default_factory=list)
     latency_ms: float = Field(..., ge=0.0)
     cached: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    autopsy_submitted: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class WorkspaceSummary(BaseModel):
@@ -200,6 +255,11 @@ class WorkspaceSummary(BaseModel):
     average_latency_ms: float = Field(default=0.0, ge=0.0)
     protection_events: int = Field(default=0, ge=0)
     blank_baseline: bool = False
+    top_reason: str | None = None
+    discipline_streak: int = 0
+    active_capital_at_risk: float = 0.0
+    circadian_risk_profile: dict[int, float] = Field(default_factory=dict)
+    losing_streak_breached_12h: bool = False
 
 
 class AdminUserRecord(BaseModel):
@@ -250,7 +310,7 @@ class Intervention(BaseModel):
 
     intervention_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     symbol: str
     decision: Decision
     risk_score: float = Field(..., ge=0.0, le=1.0)
@@ -280,7 +340,7 @@ class HealthResponse(BaseModel):
 
     status: Literal["ok", "degraded", "down"]
     version: str = Field(default="1.0.0")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ReadinessResponse(BaseModel):
@@ -307,3 +367,12 @@ class AdminOverview(BaseModel):
     average_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     users: list[AdminUserRecord] = Field(default_factory=list)
     recent_jobs: list[OnboardingStatus] = Field(default_factory=list)
+
+
+class FeedbackSubmission(BaseModel):
+    """autopsy feedback submitted by the user after cooldown expires."""
+
+    user_id: str
+    audit_id: int
+    feedback_label: Literal["VALID_INTERCEPT", "FALSE_POSITIVE"]
+    estimated_capital_saved: float = 0.0

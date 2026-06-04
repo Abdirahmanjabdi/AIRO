@@ -102,3 +102,12 @@ frontend/.vite/
 
 # Docker secrets
 docker-compose.override.yml
+
+# Databases and local agent states
+*.db
+.agents/
+.claude/
+.claude-flow/
+.swarm/
+agents/
+

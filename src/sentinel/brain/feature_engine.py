@@ -15,15 +15,12 @@ Rules:
 
 from __future__ import annotations
 
-from typing import Sequence
-
-import numpy as np
 import pandas as pd
-
 
 # =============================================================================
 # BEHAVIORAL FEATURES (V1)
 # =============================================================================
+
 
 def compute_hour_decimal(open_time: pd.Series) -> pd.Series:
     """Convert datetime to decimal hour (14:30 → 14.5)."""
@@ -78,6 +75,7 @@ def compute_lot_deviation(lots: pd.Series, window: int = 20) -> pd.Series:
 # CONTEXT FEATURES (V2)
 # =============================================================================
 
+
 def compute_realized_volatility(
     open_price: pd.Series,
     close_price: pd.Series,
@@ -107,6 +105,7 @@ def compute_trend_momentum(
 # TARGET LABEL
 # =============================================================================
 
+
 def compute_is_high_risk(
     pnl: pd.Series,
     drawdown_state: pd.Series,
@@ -135,18 +134,30 @@ def compute_is_high_risk(
 
 # Column names expected in raw CSV / broker data
 _REQUIRED_COLUMNS: list[str] = [
-    "Open Time", "Close Time", "PnL", "Lots",
-    "Open Price", "Close Price", "RR Ratio", "Gain",
+    "Open Time",
+    "Close Time",
+    "PnL",
+    "Lots",
+    "Open Price",
+    "Close Price",
+    "RR Ratio",
+    "Gain",
 ]
 
 # Engineered feature names (output columns)
 FEATURE_COLUMNS_V1: list[str] = [
-    "Hour_Decimal", "Losing_Streak", "Drawdown_State",
-    "Lot_Deviation", "Revenge_Timer", "Lots", "RR Ratio",
+    "Hour_Decimal",
+    "Losing_Streak",
+    "Drawdown_State",
+    "Lot_Deviation",
+    "Revenge_Timer",
+    "Lots",
+    "RR Ratio",
 ]
 
 FEATURE_COLUMNS_V2: list[str] = FEATURE_COLUMNS_V1 + [
-    "Realized_Vol_20", "Trend_Momentum",
+    "Realized_Vol_20",
+    "Trend_Momentum",
 ]
 
 
@@ -174,15 +185,11 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # --- Clean Gain column ---
     if result["Gain"].dtype == object:
-        result["Gain"] = (
-            result["Gain"].str.replace("%", "", regex=False).astype(float)
-        )
+        result["Gain"] = result["Gain"].str.replace("%", "", regex=False).astype(float)
 
     # --- V1: Behavioral Features ---
     result["Hour_Decimal"] = compute_hour_decimal(result["Open Time"])
-    result["Revenge_Timer"] = compute_revenge_timer(
-        result["Open Time"], result["Close Time"]
-    )
+    result["Revenge_Timer"] = compute_revenge_timer(result["Open Time"], result["Close Time"])
     result["Losing_Streak"] = compute_losing_streak(result["PnL"])
     result["Drawdown_State"] = compute_drawdown_state(result["PnL"])
     result["Lot_Deviation"] = compute_lot_deviation(result["Lots"])
@@ -207,6 +214,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 # SINGLE-ROW FEATURE COMPUTATION (Real-time API)
 # =============================================================================
+
 
 def compute_single_trade_features(
     trade: dict[str, float | int],

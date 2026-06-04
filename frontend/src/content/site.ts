@@ -1,130 +1,130 @@
-export const PRODUCT_TAGLINE = "Identity-first trade protection for MT5 operators and funded-trader businesses.";
+export const PRODUCT_TAGLINE = "Stop blowing funded accounts. Algorithmic hard-coded lockout and 12-hour breach protection for serious futures and forex traders.";
 
 export const heroPillars = [
   {
-    eyebrow: "Identity-First Inference",
-    title: "Every trader gets a private behavioral baseline.",
+    eyebrow: "Stop Revenge Trading",
+    title: "Willpower is a failed risk management strategy.",
     description:
-      "Sentinel Zero trains and loads a dedicated model per trader, so the system reacts to their actual revenge-trading signature instead of a generic average.",
+      "When tilt hits, logic vanishes. Sentinel Zero acts as a hard-coded physical lockout layer, intercepting toxic sizing cascades and revenge re-entries inside the broker engine before your drawdown limit is breached.",
   },
   {
-    eyebrow: "Zero-Trust Security",
-    title: "Broker secrets move through Vault, not through your database.",
+    eyebrow: "12-Hour Breach Protection",
+    title: "Dynamic anomaly sensitivity when you need it most.",
     description:
-      "Read-only MT5 credentials are sealed before persistence, then handed to the bridge only for the onboarding and telemetry flow that needs them.",
+      "If you experience a consecutive loss streak (2+ losses), the ML engine automatically tightens anomaly sensitivity to 0.05. It restricts execution speed, slashes size limits, and blocks reckless trades for a full 12 hours.",
   },
   {
-    eyebrow: "Elastic Control Plane",
-    title: "The platform watches latency, readiness, and fleet state in one place.",
+    eyebrow: "Institutional Safeguards",
+    title: "Vault-secured read-only monitoring for MT5.",
     description:
-      "The same interface that onboards a trader also surfaces readiness, audits, model artifacts, and cluster-backed control-plane health.",
+      "We connect using read-only API access keys, encrypted instantly via HashiCorp Vault. Sentinel monitors execution telemetry, calculates realtime SHAP values, and keeps your trading account 100% secure.",
   },
 ];
 
 export const platformFacts = [
-  "FastAPI brain with personalized ML inference",
-  "AWS-ready EKS deployment with Redis, Postgres, Vault, and S3",
-  "MT5 relay bridge that stays dumb and passes telemetry upstream",
-  "Per-user audit trail for ROM, coaching, and compliance",
+  "Algorithmic Hard-Coded Lockout with sub-50ms intercept speed",
+  "12-Hour Breach Protection that automatically tightens risk boundaries on streak loss",
+  "No chrome extensions or local delays—runs directly inside EKS Win Server MT5 relays",
+  "Detailed decision audit ledger with SHAP values explaining every intercept",
 ];
 
 export const workflowSteps = [
   {
     id: "vault",
-    title: "Vault",
+    title: "Secure MT5 API",
     description:
-      "The browser submits the read-only password through the credentials endpoint so the secret is sealed before the rest of onboarding begins.",
+      "Input your read-only broker credentials. They are immediately sealed inside Vault-level AES-256 encrypted storage.",
   },
   {
     id: "provision",
-    title: "Provision",
+    title: "Spawn Relay",
     description:
-      "The backend registers the user identity, persists the onboarding job, and dispatches the MT5 bridge work for that trader.",
+      "Sentinel registers your identity and spins up a dedicated high-speed Windows Server MT5 relay node on our EC2 cluster.",
   },
   {
     id: "history",
-    title: "History",
+    title: "Train Baseline",
     description:
-      "The bridge verifies the broker session and pulls the latest MT5 deals so the feature engine has real trading behavior to learn from.",
+      "The system syncs your trading history to map your personalized variance baseline and emotional anomaly threshold.",
   },
   {
     id: "baseline",
-    title: "Baseline",
+    title: "Arm Sentinel",
     description:
-      "The brain engineers features, trains the model, persists the artifact to S3 or MinIO, and exposes the baseline to live inference.",
+      "The risk gateway is armed. Live telemetry is analyzed. If emotional tilt or drawdown bounds are breached, execution is terminated.",
   },
 ];
 
 export const productCapabilities = [
   {
-    title: "Behavioral anomaly detection",
+    title: "Emotional Tilt Intercept",
     description:
-      "Blend Isolation Forest and Random Forest outputs into a single risk decision that can allow, block, or reduce position size.",
+      "Detects rapid lot-size escalations, revenge timer compressions, and extreme lot deviation anomalies, terminating access to cool you down.",
   },
   {
-    title: "Blank-baseline onboarding",
+    title: "12-Hour Streak Tightening",
     description:
-      "New accounts do not crash the workflow. If there is no broker history yet, Sentinel records a blank baseline and keeps the account ready for future retraining.",
+      "If a losing streak is detected within a 12h window, risk parameters dynamically tighten, reducing your max allowable size.",
   },
   {
-    title: "Decision audit stream",
+    title: "Explainable Risk Audits",
     description:
-      "Every score is stored with latency, explanation features, mode, and cache metadata so the operator can prove what was prevented and why.",
+      "Every single trade decision is logged with deep explainability showing exactly which feature triggered the intercept.",
   },
   {
-    title: "Operator-grade runtime status",
+    title: "Physical Terminal Lockout",
     description:
-      "Redis, Postgres, model loading, and readiness are surfaced directly in the UI instead of hidden behind generic green-dot dashboards.",
+      "No client-side workarounds. Sentinel executes physical closing orders at the broker layer, preventing web-terminal override.",
   },
 ];
 
 export const faqs = [
   {
-    question: "What makes Sentinel Zero different from a generic risk bot?",
+    question: "How does Sentinel prevent me from blowing a prop firm account?",
     answer:
-      "Sentinel Zero does not score a trader against an average population. It trains a baseline tied to that trader's own MT5 history, then applies it during live inference so protection reflects their personal behavior.",
+      "Prop firms fail 95% of traders due to strict daily drawdown limits. Sentinel continuously tracks your drawdown state and revenge trading metrics. If you tilt or hit a losing streak, Sentinel blocks trading at the gateway level, keeping you well within your daily drawdown boundaries.",
   },
   {
-    question: "Do you store the trader's broker password in the database?",
+    question: "What is the 12-Hour Breach Protection?",
     answer:
-      "No. The frontend sends the read-only password to the credentials endpoint, which is designed to move the secret into Vault-backed storage. Postgres stores metadata and job state, not plaintext credentials.",
+      "If you hit 2 or more losses within a 12-hour lookback window, Sentinel enters Restricted Mode. It tightens its anomaly sensitivity threshold from normal to 0.05. This means any deviation in your lot size, hold time, or contract volume will trigger an immediate trade blocker.",
   },
   {
-    question: "What happens if an account is brand new and has no MT5 history?",
+    question: "Can I bypass the lockout if I get angry?",
     answer:
-      "The onboarding flow records a blank baseline instead of failing. That lets the trader connect immediately while the platform waits for enough history to retrain a personalized model.",
+      "No. Sentinel's lockout is enforced directly by the Windows MT5 relay node in the cloud. Even if you close your web browser or uninstall your local workspace, the lockout remains active for the full duration of your cooldown timer.",
   },
   {
-    question: "Can the frontend run without Supabase?",
+    question: "How are my MT5 credentials protected?",
     answer:
-      "Yes. The current product can run end to end against the FastAPI backend, Redis, Postgres, Vault, and S3. A dedicated auth platform like Supabase or Clerk can still be added later if you want richer customer identity and session management.",
+      "Sentinel uses read-only passwords to monitor and close positions. Your broker credentials are never exposed and are encrypted with HashiCorp Vault. Sentinel cannot withdraw funds or execute arbitrary trades beyond risk management protocols.",
   },
   {
-    question: "What does the admin plane show?",
+    question: "Does it support new accounts?",
     answer:
-      "The operator view aggregates users, onboarding jobs, recent decision state, and baseline readiness so the team can monitor rollout quality and operational health.",
+      "Yes. If your account is brand new, Sentinel initiates a Blank Baseline state. It enforces standard conservative limits while it trains a customized behavioral model on your first 20-50 trades.",
   },
   {
-    question: "How does Sentinel fit into a funded-trader or Whop workflow?",
+    question: "What is the response latency?",
     answer:
-      "Whop can drive membership lifecycle events while Sentinel handles onboarding, model training, and decision monitoring. The frontend is built to present that as one continuous SaaS workflow.",
+      "Sentinel processes telemetry and evaluates risk in less than 50 milliseconds. The EKS Windows Server relay intercepts trade signals instantly, ensuring you are blocked before a trade fills.",
   },
 ];
 
 export const workspaceHighlights = [
   {
-    label: "Live decision budget",
-    value: "500 ms",
-    detail: "Target telemetry-to-decision loop for the protected path.",
+    label: "Active Lockout Speed",
+    value: "Sub-50ms",
+    detail: "High-frequency trade intercepts at the MT5 relay gateway.",
   },
   {
-    label: "Model storage",
-    value: "S3 / MinIO",
-    detail: "Per-user artifacts persisted for repeatable inference.",
+    label: "Drawdown Defense",
+    value: "Tilt Blocker",
+    detail: "Un-bypasable cloud-enforced locks to protect prop firm funding.",
   },
   {
-    label: "Infra readiness",
-    value: "Redis + Postgres",
-    detail: "Runtime checks surfaced directly in the operator UI.",
+    label: "Breach Lookback",
+    value: "12-Hour Streak",
+    detail: "Dynamic risk tightening to 0.05 sensitivity on consecutive losses.",
   },
 ];

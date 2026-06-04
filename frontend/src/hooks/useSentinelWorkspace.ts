@@ -22,7 +22,8 @@ export function useSentinelWorkspace(identity: SentinelIdentity | null) {
     queryKey: ["sentinel", "dashboard", userId],
     queryFn: () => sentinelApi.getDashboard(userId as string),
     enabled: Boolean(userId),
-    refetchInterval: 5000,
+    staleTime: 5000,
+    refetchInterval: 10000,
   });
 
   return {

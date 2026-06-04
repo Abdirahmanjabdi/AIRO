@@ -47,12 +47,12 @@ describe("frontend product shell", () => {
     );
 
     expect(
-      await screen.findByText("The command layer for traders you cannot afford to lose."),
+      await screen.findByText("Algorithmic Hard-Coded Lockout."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Real answers for the product we are actually shipping."),
+      screen.getByText(/Stop blowing funded accounts due to a 5-minute emotional tilt/i),
     ).toBeInTheDocument();
-    expect(screen.getByText("Platform facts")).toBeInTheDocument();
+    expect(screen.getByText("Live runtime")).toBeInTheDocument();
   });
 
   it("keeps operator-only admin navigation out of the default sidebar", () => {
@@ -76,6 +76,20 @@ describe("frontend product shell", () => {
     expect(screen.getAllByText("ZERO-TRUST STORAGE")).toHaveLength(2);
     expect(screen.getByLabelText("MINIMUM HISTORY")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "100 trades" })).toBeInTheDocument();
+  });
+
+  it("renders the five Risk DNA survey controls", () => {
+    render(
+      <MemoryRouter>
+        <Onboarding identity={null} onConnected={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText("TYPICAL ROUND-TRIP TRADES PER DAY")).toBeInTheDocument();
+    expect(screen.getByLabelText("STANDARD UNIT LOT SIZE FOR $100K")).toBeInTheDocument();
+    expect(screen.getByLabelText("AVERAGE WIN HOLD TIME (MINUTES)")).toBeInTheDocument();
+    expect(screen.getByLabelText("AFTER A LOSS")).toBeInTheDocument();
+    expect(screen.getByLabelText("CONSECUTIVE LOSSES BEFORE REVIEW")).toBeInTheDocument();
   });
 
   it("renders a guided 404 surface for unknown routes", () => {

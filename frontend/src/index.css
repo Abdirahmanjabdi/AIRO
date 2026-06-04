@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:wght@300..700&family=Fira+Code:wght@300..600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,43 +6,44 @@
 
 @layer base {
   :root {
-    --background: 228 20% 6%;
-    --foreground: 210 12% 84%;
+    --background: 225 43% 7%;
+    --foreground: 210 12% 90%;
 
-    --card: 224 26% 10% / 0.5;
-    --card-foreground: 210 12% 84%;
-    --card-border: 223 20% 18% / 0.5;
+    --card: 225 43% 9% / 0.45;
+    --card-foreground: 210 12% 90%;
+    --card-border: 218 38% 15% / 0.5;
 
-    --popover: 224 24% 10% / 0.95;
-    --popover-foreground: 210 12% 84%;
+    --popover: 225 43% 8% / 0.96;
+    --popover-foreground: 210 12% 90%;
 
-    --primary: 36 90% 55%;
-    --primary-foreground: 228 20% 6%;
+    --primary: 39 55% 56%;
+    --primary-foreground: 225 43% 7%;
 
-    --secondary: 174 60% 55%;
-    --secondary-foreground: 228 20% 6%;
+    --secondary: 39 55% 56%;
+    --secondary-foreground: 225 43% 7%;
 
-    --muted: 224 17% 15%;
-    --muted-foreground: 218 10% 56%;
+    --muted: 225 35% 12%;
+    --muted-foreground: 218 10% 64%;
 
-    --accent: 36 90% 55%;
-    --accent-foreground: 228 20% 6%;
+    --accent: 39 55% 56%;
+    --accent-foreground: 225 43% 7%;
 
     --destructive: 355 76% 56%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 223 18% 18% / 0.6;
-    --input: 224 16% 13% / 0.88;
-    --ring: 36 90% 55%;
+    --border: 218 38% 15% / 0.5;
+    --input: 225 35% 11% / 0.88;
+    --ring: 39 55% 56%;
 
-    --radius: 4px;
+    --radius: 2px;
 
-    --surface-alt: 226 25% 8% / 0.72;
-    --surface-hover: 224 16% 13% / 0.9;
-    --surface-elevated: 223 30% 12% / 0.6;
+    --surface-alt: 225 43% 8% / 0.72;
+    --surface-hover: 225 35% 12% / 0.9;
+    --surface-elevated: 225 43% 10% / 0.6;
 
-    --font-mono: 'Space Mono', monospace;
-    --font-display: 'Inter', sans-serif;
+    --font-mono: 'Fira Code', 'Space Mono', 'Cascadia Mono', monospace;
+    --font-sans: 'Inter', -apple-system, sans-serif;
+    --font-display: 'Playfair Display', Georgia, serif;
   }
 }
 
@@ -52,8 +53,8 @@
   }
 
   body {
-    @apply bg-background text-foreground font-display antialiased;
-    background-image: radial-gradient(circle at 50% 0%, hsl(224 20% 12%), hsl(228 20% 6%) 60%);
+    @apply bg-background text-foreground font-sans antialiased;
+    background-color: hsl(var(--background));
     background-attachment: fixed;
   }
 
@@ -62,7 +63,8 @@
   }
 
   ::selection {
-    background: hsl(174 60% 55% / 0.28);
+    background: hsl(var(--primary) / 0.2);
+    color: hsl(var(--foreground));
   }
 }
 
@@ -70,8 +72,17 @@
   .font-display {
     font-family: var(--font-display);
   }
+  .font-sans {
+    font-family: var(--font-sans);
+  }
   .font-mono {
     font-family: var(--font-mono);
+  }
+  .qasali-grid {
+    background-image: 
+      linear-gradient(to right, rgba(19, 27, 43, 0.4) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(19, 27, 43, 0.4) 1px, transparent 1px);
+    background-size: 36px 36px;
   }
 }
 
@@ -82,10 +93,10 @@
     border: 1px solid hsl(var(--border));
     background:
       linear-gradient(180deg, hsl(var(--surface-elevated)), hsl(var(--card))),
-      linear-gradient(135deg, hsl(174 60% 55% / 0.04), transparent 46%);
+      linear-gradient(135deg, hsl(var(--primary) / 0.03), transparent 46%);
     box-shadow:
-      0 24px 70px rgba(0, 0, 0, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      0 12px 40px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.02);
     backdrop-filter: blur(24px);
   }
 
@@ -95,8 +106,8 @@
     inset: 0;
     pointer-events: none;
     background:
-      linear-gradient(135deg, rgba(78, 205, 196, 0.08), transparent 38%),
-      linear-gradient(315deg, rgba(245, 166, 35, 0.08), transparent 34%);
+      linear-gradient(135deg, rgba(203, 161, 83, 0.05), transparent 38%),
+      linear-gradient(315deg, rgba(203, 161, 83, 0.03), transparent 34%);
     opacity: 0.85;
   }
 
@@ -107,20 +118,20 @@
 
   .surface-panel-primary::before {
     background:
-      linear-gradient(135deg, rgba(245, 166, 35, 0.16), transparent 42%),
-      linear-gradient(315deg, rgba(255, 255, 255, 0.04), transparent 38%);
+      linear-gradient(135deg, rgba(203, 161, 83, 0.12), transparent 42%),
+      linear-gradient(315deg, rgba(255, 255, 255, 0.02), transparent 38%);
   }
 
   .surface-panel-secondary::before {
     background:
-      linear-gradient(135deg, rgba(78, 205, 196, 0.16), transparent 42%),
-      linear-gradient(315deg, rgba(255, 255, 255, 0.04), transparent 38%);
+      linear-gradient(135deg, rgba(203, 161, 83, 0.08), transparent 42%),
+      linear-gradient(315deg, rgba(255, 255, 255, 0.02), transparent 38%);
   }
 
   .surface-panel-danger::before {
     background:
-      linear-gradient(135deg, rgba(230, 57, 70, 0.16), transparent 42%),
-      linear-gradient(315deg, rgba(255, 255, 255, 0.04), transparent 38%);
+      linear-gradient(135deg, rgba(230, 57, 70, 0.12), transparent 42%),
+      linear-gradient(315deg, rgba(255, 255, 255, 0.02), transparent 38%);
   }
 
   .eyebrow-label {
@@ -128,7 +139,7 @@
     line-height: 1;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: hsl(var(--secondary));
+    color: hsl(var(--primary));
   }
 
   .grid-fade {
@@ -189,4 +200,23 @@
 
 .animate-glow-sweep {
   animation: glow-sweep 2.8s ease-in-out infinite;
+}
+
+@keyframes pulse-red-glow {
+  0% {
+    background-color: #080b12;
+    box-shadow: inset 0 0 50px rgba(220, 38, 38, 0.04);
+  }
+  100% {
+    background-color: #0d080e;
+    box-shadow: inset 0 0 150px rgba(220, 38, 38, 0.12);
+  }
+}
+
+.restricted-grid {
+  background-image: 
+    linear-gradient(to right, rgba(220, 38, 38, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(220, 38, 38, 0.08) 1px, transparent 1px);
+  background-size: 36px 36px;
+  animation: pulse-red-glow 3s ease-in-out infinite alternate;
 }

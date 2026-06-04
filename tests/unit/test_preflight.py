@@ -8,7 +8,7 @@ from sentinel.api.main import app
 from sentinel.api.routes import health
 from sentinel.bridge import mt5_history
 from sentinel.bridge.mt5_relay import MT5BridgeRelay, TradeTelemetry
-from sentinel.infra.redis_cache import cache_manager
+from sentinel.infra.redis_cache import CacheManager, InMemoryRedis, cache_manager
 from sentinel.infra.s3 import model_store
 from sentinel.infra import vault_client
 from tests.mocks import mt5_simulator
@@ -25,6 +25,14 @@ def test_cache_key_is_scoped_to_user_and_hash() -> None:
     )
     assert key.startswith("risk:trader-123:")
     assert len(key.split(":")[2]) == 64
+
+
+@pytest.mark.asyncio
+async def test_intervention_lock_is_idempotent() -> None:
+    manager = CacheManager(InMemoryRedis())
+    ticket_id = 998877
+    assert await manager.acquire_intervention_lock(ticket_id, ttl_seconds=10) is True
+    assert await manager.acquire_intervention_lock(ticket_id, ttl_seconds=10) is False
 
 
 def test_vault_storage_keeps_ciphertext_out_of_memory_store(monkeypatch: pytest.MonkeyPatch) -> None:

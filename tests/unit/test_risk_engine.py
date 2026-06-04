@@ -162,3 +162,32 @@ class TestSerialization:
         brain = SentinelBrain()
         with pytest.raises(RuntimeError, match="Cannot save untrained"):
             brain.save(Path("/tmp/should_not_exist.joblib"))
+
+
+class TestDynamicAnomalySensitivity:
+    """Test dynamic IsolationForest contamination threshold shifts."""
+
+    def test_dynamic_threshold_tightens_on_losing_streak_breach(
+        self,
+        trained_brain: SentinelBrain,
+        sample_context: TradeContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Mock decision_function to return a marginal value (0.02)
+        # This is a safe inlier under standard 0.0 threshold, but an anomaly under tightened 0.05 threshold.
+        monkeypatch.setattr(
+            trained_brain.iso_forest,
+            "decision_function",
+            lambda x: [0.02],
+        )
+
+        # 1. Standard mode: 0.02 >= 0.0 threshold -> is_anomaly = False
+        res_standard = trained_brain.assess_risk(sample_context, losing_streak_breached_12h=False)
+        assert res_standard.is_anomaly is False
+
+        # 2. Breached mode: 0.02 < 0.05 threshold -> is_anomaly = True
+        res_breached = trained_brain.assess_risk(sample_context, losing_streak_breached_12h=True)
+        assert res_breached.is_anomaly is True
+        assert res_breached.decision == Decision.BLOCK
+        assert res_breached.size_multiplier == 0.0
+

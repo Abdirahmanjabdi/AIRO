@@ -1,172 +1,240 @@
-# Sentinel Zero — AI-Driven Risk Management Layer
+# Sentinel Trading
 
-> **Identity-first, model-driven trade protection for professional traders on FTMO, prop firms, and managed accounts.**
+Sentinel Trading is an institutional behavioral-risk engine for MetaTrader 5 traders. It uses Elevated Collaborative Intelligence (ECI) to detect trading behaviors that destroy capital: revenge entries, oversized positions, drawdown pressure, fatigue patterns, and abnormal deviation from a trader's own baseline.
 
-[![CI](https://github.com/Abdirahmanjabdi/AIRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Abdirahmanjabdi/AIRO/actions)
-[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)](https://fastapi.tiangolo.com/)
-[![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
+Sentinel does not predict market direction. It protects the trader from themselves when execution quality starts to degrade.
 
----
+## Mission
 
-## 🧠 What Is Sentinel Zero?
+Financial markets already punish poor timing, poor sizing, and emotional escalation. Most trading tools focus on entries, indicators, or automation. Sentinel focuses on the missing layer: behavioral governance.
 
-Sentinel Zero is a real-time, per-user risk assessment engine that sits between a trader's MetaTrader 5 terminal and their live account. It uses a personalized **Isolation Forest + Random Forest** model trained on each trader's own behavioral baseline to detect anomalous trade patterns, equity drawdown violations, and revenge-trading cycles — and intervene in milliseconds to prevent catastrophic account blowup.
+The system observes live trading telemetry, compares each trade against the trader's own profile, records an audit trail, and can optionally intervene through a secured MT5 bridge. The goal is capital preservation, funded-account protection, and executive-grade visibility into human behavioral risk.
 
-**Key capabilities:**
-- **Identity-first architecture** — every assessment is scoped to a specific user model; no shared risk parameters
-- **Real-time telemetry** — a lightweight MT5 bridge streams live position data to the Brain API every 2 seconds
-- **Explainable AI** — every BLOCK decision includes a SHAP-powered reason visible on the Command Centre dashboard
-- **Vault-secured credentials** — broker login details are never stored in plaintext; all access is via HashiCorp Vault
+## Product Workflow
 
----
-
-## 🏗️ High-Level Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        TRADER'S MACHINE                         │
-│                                                                 │
-│   MetaTrader 5  ──────►  MT5 Bridge (mt5_relay.py)             │
-│   (Live Account)          Python / MT5 API                      │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ HTTPS POST /v1/analyze
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     SENTINEL BRAIN (EKS)                        │
-│                                                                 │
-│  ┌────────────┐   ┌─────────────┐   ┌──────────────────────┐  │
-│  │  FastAPI   │──►│ Risk Engine  │──►│  PostgreSQL (Audits) │  │
-│  │  Brain API │   │  (IsoForest  │   │  Redis (Cache/State) │  │
-│  └────────────┘   │  + RandForest│   │  S3 (Model Store)   │  │
-│                   │  + SHAP)     │   └──────────────────────┘  │
-│                   └─────────────┘                               │
-│                         │                                       │
-│                   ┌─────▼──────┐                               │
-│                   │   Vault    │  ← Broker Credentials          │
-│                   └────────────┘                               │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ WebSocket / REST
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   COMMAND CENTRE (React SPA)                    │
-│                                                                 │
-│   Risk Gauge · Audit Table · Baseline Status · SHAP Hover      │
-└─────────────────────────────────────────────────────────────────┘
+```text
+Trader / MT5 Account
+  -> Sentinel MT5 Bridge Pod
+     -> FastAPI Brain API
+        -> API-key authentication
+        -> Redis Cluster cache, locks, heartbeats
+        -> SentinelBrain inference
+        -> PostgreSQL user state and audit trail
+        -> behavioral_logs feature store
+        -> S3 Parquet data lake
+        -> S3 / MinIO per-user model artifacts
+        -> Vault-backed credential storage
 ```
 
----
+The default operating mode is audit-only. Capital-affecting intervention is disabled unless `SENTINEL_ENFORCE_MODE=true`.
 
-## 🚀 Getting Started
+## The Brain
 
-### Prerequisites
+SentinelBrain combines:
 
-| Tool | Version |
-|------|---------|
-| Python | 3.12+ |
-| Node.js | 20+ |
-| Docker Desktop | Latest |
-| MetaTrader 5 | Any (Windows) |
+- **Isolation Forest anomaly detection** for unsupervised behavioral outlier detection.
+- **Random Forest risk classification** for supervised risk scoring when labels exist.
+- **Dynamic Z-score baselining** so a 0.01-lot trader and a 100-lot trader are judged relative to their own normal behavior.
+- **Risk DNA onboarding** that captures trade frequency, standard unit size, hold time, loss response, and drawdown tolerance before the first live decision.
+- **Maturity tiers** from bootstrap to shadow mode to active personalized scoring.
+- **SHAP background explanations** for auditability and operator review.
 
-### 1. Clone & Configure
+The important principle is style agnosticism. Sentinel avoids fixed global claims like "10 lots is dangerous." Instead, it asks whether this trade is abnormal for this trader, in this regime, at this moment.
+
+## Security And Authentication
+
+Sentinel uses an API-key gate for protected `/v1/*` routes.
+
+- Bootstrap routes issue and store API credentials.
+- API keys are hashed before database storage.
+- The React frontend captures the issued key during onboarding.
+- Later dashboard and inference calls inject `X-API-Key` automatically.
+- Backend validation compares the incoming header against the stored hash.
+
+Credential handling is separated from the trading dataset. Broker passwords are routed through Vault-backed storage and are not written to PostgreSQL audit logs.
+
+## Governance And Compliance
+
+Sentinel treats behavioral telemetry as the company's core dataset.
+
+- `behavioral_logs` stores high-fidelity feature telemetry for training and drift management.
+- Logs use hashed trader identity rather than raw `user_id`.
+- PostgreSQL handles real-time state and audit reads.
+- S3 receives Parquet exports for offline model training.
+- Daily export is partitioned by date for future deep learning workflows.
+
+This keeps the production database responsive while preserving a structured behavioral data lake.
+
+## Risk DNA Onboarding
+
+Sentinel now primes the Hybrid Brain before a trader reaches the 20-trade shadow threshold. The onboarding survey captures five cold-start anchors:
+
+- Typical round-trip trades per day for style-regime separation.
+- Standard unit lot size for a `$100k` equivalent position.
+- Average winning-trade hold time in minutes.
+- Loss response profile: wait for setup, mixed, or immediate re-entry.
+- Consecutive-loss threshold before the trader questions the strategy.
+
+When MT5 history is available, the backend fits the Isolation Forest and classifier using both the historical trades and synthetic Risk DNA priors. With Risk DNA plus 10 usable historical trades, the account can graduate directly to `maturity_2` active personalized scoring instead of waiting for trade 21.
+
+## Scale Path
+
+The architecture is designed to grow from Vanguard beta users to a 10,000-account fleet:
+
+| Layer | Current Design |
+|---|---|
+| Control plane | FastAPI Brain API on Kubernetes |
+| Data plane | One MT5 bridge pod per trader |
+| Compute scaling | EKS managed nodes plus Karpenter MT5 node pool |
+| State | ElastiCache Redis replication group with cluster mode |
+| Persistence | RDS PostgreSQL for state and audits |
+| Model artifacts | S3 / MinIO joblib model store |
+| Behavioral data lake | S3 Parquet partitions |
+| Exposure | AWS Load Balancer Controller and ALB Ingress |
+
+Terraform validates locally, but production rollout still requires a real AWS `terraform plan` with valid credentials before any `apply`.
+
+## Maturity Workflow
+
+| State | Trigger | Behavior |
+|---|---|---|
+| `maturity_0` | No usable history | Bootstrap scoring from Risk DNA |
+| `maturity_1` | Early history | Shadow-mode observation |
+| `maturity_2` | Risk DNA plus 10+ history trades, or mature model ready | Personalized Isolation Forest + classifier scoring |
+
+Live behavioral logs trigger background retraining every 20 trades. Redis retraining locks prevent duplicate training jobs for the same user.
+
+## Intervention Safety
+
+Sentinel is built to fail conservatively.
+
+- Decision timeouts return a blocking risk response.
+- MT5 duplicate interventions are protected by Redis idempotency locks.
+- Global close-all fail-safe requires repeated MT5 failures and confirmed terminal disconnect.
+- Enforcement is disabled by default.
+- Operator-facing UI separates audit, monitoring, and live enforcement posture.
+
+## Repository Layout
+
+```text
+src/sentinel/
+  api/              FastAPI app, auth dependency, routes, runtime startup
+  brain/            feature engineering and SentinelBrain risk engine
+  bridge/           MT5 history collector and live relay
+  domain/           Pydantic contracts and enums
+  infra/            DB, Redis, S3, data lake, Vault clients
+
+frontend/
+  src/App.tsx       React route tree and workspace shell
+  src/lib/api.ts    Typed API client with X-API-Key injection
+  src/pages/        Landing, onboarding, trading, analytics, admin, runtime
+  src/components/   Dashboard, shell, charts, and UI components
+
+infra/
+  docker/           Brain and MT5 container definitions
+  helm/             Brain, MT5 pod, and Vault charts
+  terraform/        VPC, EKS, Karpenter, RDS, Redis, S3, ECR, ALB, IAM
+
+tests/
+  unit/             Domain, feature, risk, and preflight tests
+  integration/      FastAPI integration tests
+  mocks/            MT5 simulator
+```
+
+## Local Development
+
+### Requirements
+
+- Python 3.12+
+- Node.js 20+
+- Docker Desktop
+- Windows + MetaTrader5 package for real MT5 integration
+
+### Run Everything Locally
 
 ```bash
-git clone https://github.com/Abdirahmanjabdi/AIRO.git
-cd AIRO
-cp .env.example .env   # Fill in your values — never commit .env!
+docker compose up -d --build
 ```
 
-### 2. Start the Backend (Brain + Data Stores)
+Local services:
+
+- Frontend: `http://localhost:8080`
+- Brain API: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- MinIO: `http://localhost:9001`
+- Vault dev server: `http://localhost:8200`
+- Redis: `localhost:6379`
+- Postgres: `localhost:5432`
+
+### Backend
 
 ```bash
-docker-compose up -d
+pip install -e ".[dev]"
+uvicorn sentinel.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-This spins up: **FastAPI Brain**, **PostgreSQL**, **Redis**, **Vault**, and **MinIO** (local S3).
-
-### 3. Verify Everything is Healthy
-
-```bash
-curl http://localhost:8000/healthz
-# Expected: {"status":"ok","version":"1.0.0",...}
-```
-
-### 4. Start the Frontend
+### Frontend
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
-# Open: http://localhost:8081
 ```
 
-### 5. Launch the MT5 Bridge (Windows Terminal)
+### MT5 Bridge Simulator
 
 ```powershell
-# Replace values with your FTMO credentials
 $env:PYTHONPATH="src"
-$env:VAULT_ADDR="http://localhost:8200"
-$env:VAULT_TOKEN="your-vault-token"
-$env:SENTINEL_USER_ID="Your-User-ID"
+$env:BRAIN_API_URL="http://localhost:8000"
+$env:REDIS_URL="redis://localhost:6379/0"
+$env:SENTINEL_MT5_MODULE="tests.mocks.mt5_simulator"
+$env:SENTINEL_MT5_SIMULATOR_MODE="success"
 python -m sentinel.bridge.mt5_relay
 ```
 
-### 6. Onboard Your Account
+## Verification
 
-Navigate to `http://localhost:8081/workspace/onboarding` and follow the 4-step onboarding wizard to securely store your MT5 credentials in Vault and train your personal baseline model.
-
----
-
-## 📁 Repository Structure
-
-```
-sentinel-zero/
-├── src/sentinel/
-│   ├── api/            # FastAPI routes (analyze, dashboard, onboarding)
-│   ├── brain/          # ML engine (IsolationForest, RandomForest, SHAP)
-│   ├── bridge/         # MT5 relay (live position polling)
-│   ├── db/             # SQLAlchemy models & Alembic migrations
-│   └── domain/         # Pydantic models (shared types)
-├── frontend/           # React + TypeScript Command Centre
-├── infra/
-│   ├── docker/         # Dockerfiles for brain & bridge
-│   ├── helm/           # Helm charts for EKS deployment
-│   ├── k8s/            # Kubernetes manifests
-│   └── terraform/      # EKS, RDS, Redis, S3, ECR, IAM
-├── tests/              # Unit & integration tests
-└── .github/workflows/  # CI/CD (Lint → Test → Build → Deploy)
-```
-
----
-
-## ☁️ Production Deployment (AWS EKS)
+Latest local verification:
 
 ```bash
-cd infra/terraform
-
-# 1. Initialise providers
-terraform init
-
-# 2. Review plan (use a prod.tfvars you've filled in locally — never commit it)
-terraform plan -var-file="prod.tfvars"
-
-# 3. Apply
-terraform apply -var-file="prod.tfvars"
+python -m pytest -q
 ```
 
-After the cluster is up, the GitHub Actions `deploy-eks` job will handle all future zero-downtime deployments automatically on every push to `main`.
+```bash
+cd frontend
+npm run lint
+npm test
+npm run build
+```
 
----
+Validated status:
 
-## 🔐 Security
+- Backend tests: `60 passed`
+- Frontend tests: `8 passed`
+- Frontend lint: passed
+- Frontend production build: passed
+- Terraform validation: passed after provider/module init
 
-- **Secrets:** All broker credentials are encrypted in HashiCorp Vault. `.env` files and `*.tfvars` are in `.gitignore` and are never committed.
-- **IAM:** Node group roles follow least-privilege — read/write to the model S3 bucket only; no `DeleteObject` permission.
-- **Docker:** All containers run as non-root (`sentinel` user).
-- **ECR:** Images are scanned for vulnerabilities on every push (`scan_on_push = true`).
+`terraform plan` requires valid AWS credentials. Do not run `terraform apply` on a personal/free-trial account until AWS Activate or equivalent credits are confirmed.
 
----
+## Deployment Discipline
 
-## 📄 License
+Sentinel is infrastructure-heavy by design. A 10,000-user architecture means MT5 bridge pods, Redis cluster state, RDS, S3, ALB, and EKS scaling all have real cost.
 
-Proprietary — All rights reserved. © 2026 Sentinel Zero / AIRO.
+Recommended launch sequence:
+
+1. Push the hardened repo.
+2. Secure AWS Activate credits.
+3. Run `terraform plan` with the funded AWS account.
+4. Launch a Vanguard 50 audit-only cohort.
+5. Enable intervention only after live MT5 soak testing.
+
+## Positioning
+
+Sentinel is not a signal service. It is not a trading bot. It is a behavioral governance layer for traders, prop-firm operators, and risk teams that need to preserve capital when human execution starts to fail.
+
+The moat is the anonymized behavioral dataset: live trade context, relative deviation signals, intervention outcomes, and model drift history captured in a form that can support future deep learning systems.
+
+## License
+
+The project is currently prepared for private commercial development. Confirm final licensing terms before public distribution.

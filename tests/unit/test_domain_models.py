@@ -20,8 +20,10 @@ from sentinel.domain.models import (
     OnboardingStatus,
     RiskAssessment,
     RiskMode,
+    TiltResponse,
     TradeContext,
     UserBaseline,
+    UserInitialParameters,
 )
 
 
@@ -142,11 +144,11 @@ class TestUserBaseline:
         assert baseline.is_baseline_ready is True
         assert baseline.model_s3_key is not None
 
-    def test_baseline_not_ready_without_trades(self) -> None:
+    def test_baseline_not_ready_without_any_trades(self) -> None:
         with pytest.raises(ValidationError):
             UserBaseline(
                 user_id="user-456",
-                trade_count=10,  # < 50
+                trade_count=0,
                 is_baseline_ready=True,  # Invalid
             )
 
@@ -158,6 +160,25 @@ class TestUserBaseline:
         )
         assert baseline.is_baseline_ready is False
         assert baseline.model_s3_key is None
+
+
+class TestUserInitialParameters:
+    """Tests for Risk DNA survey defaults and bounds."""
+
+    def test_risk_dna_defaults(self) -> None:
+        params = UserInitialParameters()
+        assert params.typical_daily_trades == 8
+        assert params.average_win_hold_minutes == 60.0
+        assert params.tilt_response == TiltResponse.WAIT_FOR_SETUP
+        assert params.loss_review_threshold == 3
+
+    def test_invalid_risk_dna_bounds(self) -> None:
+        with pytest.raises(ValidationError):
+            UserInitialParameters(
+                typical_daily_trades=0,
+                average_win_hold_minutes=0,
+                loss_review_threshold=0,
+            )
 
 
 class TestOnboardingStatus:
@@ -175,7 +196,7 @@ class TestOnboardingStatus:
                 user_id="user-123",
                 broker_server="ICMarkets-Demo",
                 account_id="12345678",
-                min_trades=10,  # Invalid: < 50
+                min_trades=0,
             )
 
 

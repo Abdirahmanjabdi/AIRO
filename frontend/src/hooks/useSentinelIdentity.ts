@@ -4,10 +4,11 @@ export interface SentinelIdentity {
   userId: string;
   brokerServer: string;
   accountId: string;
+  apiKey: string;
 }
 
 const STORAGE_KEY = "sentinel-zero.identity";
-const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const MAX_AGE_MS = 1000 * 60 * 60 * 23;
 
 interface StoredIdentity {
   identity: SentinelIdentity;
@@ -29,7 +30,7 @@ function readStoredIdentity(): SentinelIdentity | null {
     const identity = "identity" in parsed ? parsed.identity : parsed;
     const savedAt = "savedAt" in parsed ? parsed.savedAt : 0;
 
-    if (!identity.userId || !identity.brokerServer || !identity.accountId) {
+    if (!identity.userId || !identity.brokerServer || !identity.accountId || !identity.apiKey) {
       return null;
     }
 
